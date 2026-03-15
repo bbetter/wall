@@ -782,6 +782,56 @@ log)
     tail -f "$LOGFILE"
 ;;
 
+set)
+    KEY="${2:-}"
+    VAL="${3:-}"
+
+    case "$KEY" in
+        fps)
+            if ! [[ "$VAL" =~ ^[0-9]+$ ]] || [ "$VAL" -eq 0 ]; then
+                echo "Error: fps must be a positive integer (e.g. 30, 60)"
+                exit 1
+            fi
+            ;;
+        scaling)
+            case "$VAL" in
+                fill|fit|stretch|default) ;;
+                *)
+                    echo "Error: scaling must be one of: fill, fit, stretch, default"
+                    exit 1
+                    ;;
+            esac
+            ;;
+        *)
+            echo "Usage: wall set <setting> <value>"
+            echo ""
+            echo "  wall set fps <integer>                   (e.g. 30, 60)"
+            echo "  wall set scaling <fill|fit|stretch|default>"
+            exit 1
+            ;;
+    esac
+
+    mkdir -p "$(dirname "$CONFIG_FILE")"
+    CONF_KEY="${KEY^^}"
+
+    if grep -q "^${CONF_KEY}=" "$CONFIG_FILE" 2>/dev/null; then
+        sed -i "s|^${CONF_KEY}=.*|${CONF_KEY}=${VAL}|" "$CONFIG_FILE"
+    else
+        echo "${CONF_KEY}=${VAL}" >> "$CONFIG_FILE"
+    fi
+
+    echo "Set ${CONF_KEY}=${VAL}"
+
+    if is_running; then
+        echo "Restarting daemon to apply..."
+        kill "$(cat "$PIDFILE")" 2>/dev/null
+        rm -f "$PIDFILE"
+        sleep 0.5
+        "$0" start
+        echo "Done."
+    fi
+;;
+
 cache)
     case "${2:-rebuild}" in
         clear)
@@ -816,6 +866,8 @@ echo "  wall monitors"
 echo "  wall <id> [monitor]"
 echo "  wall list"
 echo "  wall stop [monitor]"
+echo "  wall set fps <integer>"
+echo "  wall set scaling <fill|fit|stretch|default>"
 echo "  wall log"
 echo "  wall cache [clear|rebuild]"
 echo "  wall update"

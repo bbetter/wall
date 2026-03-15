@@ -2,7 +2,10 @@
 
 Simple Wallpaper Engine launcher for Linux.
 
-Run your **Steam Wallpaper Engine** workshop wallpapers on Linux via [`linux-wallpaperengine`](https://github.com/Almamu/linux-wallpaperengine).
+> **This project is a wrapper around [linux-wallpaperengine](https://github.com/Almamu/linux-wallpaperengine) by [@Almamu](https://github.com/Almamu).**
+> All actual wallpaper rendering is done by that project. `wall` adds a daemon,
+> multi-monitor management, a fuzzy picker, and shell tooling on top of it.
+> Please star and support the upstream project.
 
 ---
 
@@ -66,6 +69,7 @@ The installer:
 | `wall status` | Show daemon and monitor status |
 | `wall monitors` | List connected monitors |
 | `wall stop [monitor]` | Stop wallpaper(s) and daemon |
+| `wall set <fps\|scaling> <value>` | Update a config setting and restart daemon |
 | `wall log` | Tail the daemon log (useful for debugging) |
 | `wall cache [clear\|rebuild]` | Manage the wallpaper metadata cache |
 | `wall update` | Update all wall scripts to latest version |
@@ -102,15 +106,21 @@ exec-once = wall random
 
 ## Configuration
 
-Config file: `~/.config/wall/config` (written by installer)
+Use `wall set` to change settings without editing files manually:
 
 ```bash
-STEAM_LIB=/path/to/SteamLibrary/steamapps
-
-# Optional overrides:
-FPS=60          # wallpaper frame rate
-SCALING=fill    # fill | fit | stretch | default
+wall set fps 30
+wall set scaling fit
 ```
+
+Changes take effect after the daemon restarts. `wall set` handles that automatically if the daemon is running.
+
+| Setting | Values | Default | Description |
+|---|---|---|---|
+| `fps` | any integer | `60` | Wallpaper frame rate |
+| `scaling` | `fill` `fit` `stretch` `default` | `fill` | How the wallpaper fills the screen |
+
+Config file location: `~/.config/wall/config`
 
 ---
 
