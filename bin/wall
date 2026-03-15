@@ -784,7 +784,7 @@ info)
     INFO_TYPE=$(jq -r '.type // ""' "$INFO_DIR/project.json")
     INFO_FILE=$(jq -r '.file // ""' "$INFO_DIR/project.json")
     INFO_VIDEO="{}"
-    if [ "$INFO_TYPE" = "video" ] && [ -n "$INFO_FILE" ] && [ -f "$INFO_DIR/$INFO_FILE" ] && command -v ffprobe >/dev/null; then
+    if [ "$INFO_TYPE" = "video" ] && [ -n "$INFO_FILE" ] && [ -f "$INFO_DIR/$INFO_FILE" ]; then
         INFO_VIDEO=$(ffprobe -v quiet -print_format json -show_streams "$INFO_DIR/$INFO_FILE" 2>/dev/null \
             | jq -c 'first(.streams[] | select(.codec_type == "video")) | {
                 width,

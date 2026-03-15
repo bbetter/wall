@@ -149,4 +149,5 @@ Installed automatically:
 | `linux-wallpaperengine` | Renders Wallpaper Engine scenes |
 | `jq` | Parses workshop metadata |
 | `python-gobject` + `gtk4` | GTK4 picker UI (`wall-picker`) |
+| `ffmpeg` | Video metadata (`ffprobe`) for resolution in `wall info` |
 | `mpv` | Video preview in `wall-picker` (via GStreamer/GTK4) |

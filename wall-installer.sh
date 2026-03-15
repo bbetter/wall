@@ -32,6 +32,7 @@ echo "Installing dependencies..."
 
 yay -S --needed \
   jq \
+  ffmpeg \
   mpv \
   linux-wallpaperengine \
   python-gobject \
