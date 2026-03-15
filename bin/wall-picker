@@ -9,9 +9,7 @@ import os
 import subprocess
 import shutil
 
-CONFIG_FILE = os.path.expanduser("~/.config/wall/config")
-
-MEDIA_EXTS  = {".mp4", ".webm", ".gif"}
+MEDIA_EXTS = {".mp4", ".webm", ".gif"}
 
 ########################################
 # WALL CLI
@@ -30,7 +28,9 @@ def wall_cmd(*args):
 
 
 def load_wallpapers():
-    """Fetch wallpaper list via `wall list`."""
+    """Fetch wallpaper list via `wall list`.
+    Output format: MARKER\\tID\\tTITLE\\tTAGS\\tTYPE
+    """
     walls = []
     for line in wall_cmd("list").splitlines():
         parts = line.split("\t")
@@ -40,8 +40,19 @@ def load_wallpapers():
                 "id":     parts[1],
                 "title":  parts[2],
                 "tags":   parts[3] if len(parts) > 3 else "",
+                "type":   parts[4].capitalize() if len(parts) > 4 else "",
             })
     return walls
+
+
+def load_info(wall_id):
+    """Fetch full wallpaper details via `wall info <id>`.
+    Returns a dict with title, type, description, tags, visibility, thumbnail, id.
+    """
+    try:
+        return json.loads(wall_cmd("info", wall_id))
+    except Exception:
+        return {}
 
 
 def get_monitors():
@@ -59,40 +70,6 @@ def apply_wallpaper(wall_id, monitor):
 
 
 ########################################
-# DIRECT FILE ACCESS
-# (wall has no commands for these yet)
-########################################
-
-def get_steam_lib():
-    if os.path.exists(CONFIG_FILE):
-        with open(CONFIG_FILE) as f:
-            for line in f:
-                line = line.strip()
-                if line.startswith("STEAM_LIB="):
-                    return line.split("=", 1)[1].strip()
-    return os.path.expanduser("~/.local/share/Steam/steamapps")
-
-
-def find_thumbnail(steam_lib, wall_id):
-    base = os.path.join(steam_lib, "workshop", "content", "431960", wall_id)
-    for fname in ("preview.mp4", "preview.webm", "preview.gif",
-                  "preview.jpg", "preview.png"):
-        path = os.path.join(base, fname)
-        if os.path.exists(path):
-            return path
-    return None
-
-
-def load_project(steam_lib, wall_id):
-    path = os.path.join(steam_lib, "workshop", "content", "431960", wall_id, "project.json")
-    try:
-        with open(path) as f:
-            return json.load(f)
-    except Exception:
-        return {}
-
-
-########################################
 # WINDOW
 ########################################
 
@@ -102,7 +79,6 @@ class WallPicker(Gtk.ApplicationWindow):
         super().__init__(application=app, title="wall-picker")
         self.set_default_size(980, 600)
 
-        self.steam_lib      = get_steam_lib()
         self.wallpapers     = load_wallpapers()
         self.selected_id    = None
         self.monitors       = get_monitors()
@@ -244,7 +220,6 @@ class WallPicker(Gtk.ApplicationWindow):
             box.set_margin_start(12)
             box.set_margin_end(12)
 
-            # active indicator
             if wall["active"]:
                 dot = Gtk.Label(label="▶")
                 dot.add_css_class("accent")
@@ -258,12 +233,22 @@ class WallPicker(Gtk.ApplicationWindow):
             title.set_ellipsize(Pango.EllipsizeMode.END)
             text_box.append(title)
 
+            sub = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+            if wall["type"]:
+                type_lbl = Gtk.Label(label=wall["type"])
+                type_lbl.add_css_class("dim-label")
+                type_lbl.set_halign(Gtk.Align.START)
+                sub.append(type_lbl)
+
             if wall["tags"]:
-                tags = Gtk.Label(label=wall["tags"])
-                tags.set_halign(Gtk.Align.START)
-                tags.set_ellipsize(Pango.EllipsizeMode.END)
-                tags.add_css_class("dim-label")
-                text_box.append(tags)
+                tags_lbl = Gtk.Label(label=wall["tags"])
+                tags_lbl.set_halign(Gtk.Align.START)
+                tags_lbl.set_ellipsize(Pango.EllipsizeMode.END)
+                tags_lbl.add_css_class("dim-label")
+                sub.append(tags_lbl)
+
+            if wall["type"] or wall["tags"]:
+                text_box.append(sub)
 
             box.append(text_box)
             row.set_child(box)
@@ -281,39 +266,37 @@ class WallPicker(Gtk.ApplicationWindow):
         return query in w["title"].lower() or query in w["tags"].lower()
 
     def _on_selected(self, _listbox, row):
-        """Single click — update preview panel only."""
+        """Single click — update preview panel via wall info."""
         if row is None:
             return
         wall = row.wall
         self.selected_id = wall["id"]
         self.apply_btn.set_sensitive(True)
 
-        self._update_preview(wall["id"])
+        info = load_info(wall["id"])
 
-        proj = load_project(self.steam_lib, wall["id"])
+        self.title_label.set_text(info.get("title", wall["title"]))
+        self.type_label.set_text(info.get("type", wall["type"]).capitalize())
 
-        self.title_label.set_text(proj.get("title", wall["title"]))
-        self.type_label.set_text(proj.get("type", "").capitalize())
-
-        visibility = proj.get("visibility", "")
+        visibility = info.get("visibility", "")
         self.visibility_label.set_text(f"· {visibility}" if visibility else "")
-
         self.active_label.set_text("· active" if wall["active"] else "")
 
-        desc = proj.get("description", "").strip()
+        desc = info.get("description", "").strip()
         self.desc_label.set_text(desc)
         self.desc_label.set_visible(bool(desc))
 
-        tags = ", ".join(proj.get("tags", [])) or wall["tags"]
+        tags = ", ".join(info.get("tags", [])) or wall["tags"]
         self.tags_label.set_text(f"Tags: {tags}" if tags else "")
         self.id_label.set_text(f"ID: {wall['id']}")
 
-    def _update_preview(self, wall_id):
+        self._update_preview(info.get("thumbnail", ""))
+
+    def _update_preview(self, thumb):
         if self._current_media is not None:
             self._current_media.pause()
             self._current_media = None
 
-        thumb = find_thumbnail(self.steam_lib, wall_id)
         if not thumb:
             self.thumbnail.set_file(None)
             return

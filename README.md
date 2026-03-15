@@ -68,6 +68,7 @@ The installer:
 | `wall list` | List all available wallpapers |
 | `wall status` | Show daemon and monitor status |
 | `wall monitors` | List connected monitors |
+| `wall info <id>` | Print full wallpaper metadata as JSON |
 | `wall stop [monitor]` | Stop wallpaper(s) and daemon |
 | `wall set <fps\|scaling> <value>` | Update a config setting and restart daemon |
 | `wall log` | Tail the daemon log (useful for debugging) |
