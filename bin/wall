@@ -23,6 +23,7 @@ CMD_FILE="$STATE_DIR/cmd"
 LOGFILE="$STATE_DIR/wall.log"
 CYCLE_FILE="$STATE_DIR/cycle"
 CACHE_FILE="$STATE_DIR/list.cache"
+PROPS_DIR="$HOME/.config/wall/props"
 
 FPS=60
 SCALING=fill
@@ -151,17 +152,29 @@ log "Launching: $TITLE on $MON"
 
 stop_monitor "$MON"
 
+local ID
+ID=$(basename "$DIR")
+
+local PROP_FLAGS=()
+local PROP_FILE="$PROPS_DIR/$ID"
+if [ -f "$PROP_FILE" ]; then
+    while IFS= read -r _line; do
+        [ -n "$_line" ] && PROP_FLAGS+=(--set-property "$_line")
+    done < "$PROP_FILE"
+fi
+
 linux-wallpaperengine \
     "$DIR" \
     --assets-dir "$ASSETS" \
     --screen-root "$MON" \
     --scaling "$SCALING" \
     --fps "$FPS" \
-    --disable-audio &
+    --disable-audio \
+    "${PROP_FLAGS[@]}" &
 
 local LAUNCHED_PID=$!
 echo "$LAUNCHED_PID" > "$D/pid"
-echo "$(basename "$DIR")" > "$D/current"
+echo "$ID" > "$D/current"
 
 }
 
@@ -800,10 +813,91 @@ info)
                 codec: .codec_name
             }' 2>/dev/null || echo "{}")
     fi
+    INFO_PROPS=$(jq -c '[
+        .properties // {} | to_entries[]
+        | select(.value.type != null and .value.type != "group")
+        | {
+            key: .key,
+            order: (.value.order // 999),
+            type: .value.type,
+            label: (.value.text // .key),
+            value: (.value.value | tostring),
+            min:     (if .value.min     != null then (.value.min     | tostring) else null end),
+            max:     (if .value.max     != null then (.value.max     | tostring) else null end),
+            step:    (if .value.step    != null then (.value.step    | tostring) else null end),
+            options: (.value.options // null)
+        }
+    ] | sort_by(.order) | map(del(.order))' "$INFO_DIR/project.json" 2>/dev/null || echo "[]")
     jq --arg id "$INFO_ID" --arg thumb "$INFO_THUMB" \
         --argjson video "$INFO_VIDEO" \
-        '. + {id: $id, thumbnail: $thumb} + (if $video != {} then {video: $video} else {} end)' \
+        --argjson props "$INFO_PROPS" \
+        '. + {id: $id, thumbnail: $thumb}
+          + (if $video != {} then {video: $video} else {} end)
+          + (if ($props | length) > 0 then {properties: $props} else {} end)' \
         "$INFO_DIR/project.json"
+;;
+
+props)
+    PROPS_Q_ID="${2:-}"
+    if [ -z "$PROPS_Q_ID" ]; then
+        echo "Usage: wall props <id>" >&2
+        exit 1
+    fi
+    PROPS_Q_DIR="$WORKSHOP_DIR/$PROPS_Q_ID"
+    if [ ! -f "$PROPS_Q_DIR/project.json" ]; then
+        echo "[]"
+        exit 0
+    fi
+    jq -c '[
+        .properties // {} | to_entries[]
+        | select(.value.type != null and .value.type != "group")
+        | {
+            key: .key,
+            order: (.value.order // 999),
+            type: .value.type,
+            label: (.value.text // .key),
+            value: (.value.value | tostring),
+            min:     (if .value.min     != null then (.value.min     | tostring) else null end),
+            max:     (if .value.max     != null then (.value.max     | tostring) else null end),
+            step:    (if .value.step    != null then (.value.step    | tostring) else null end),
+            options: (.value.options // null)
+        }
+    ] | sort_by(.order) | map(del(.order))' "$PROPS_Q_DIR/project.json" 2>/dev/null || echo "[]"
+;;
+
+prop)
+    case "${2:-}" in
+        set)
+            PROP_SET_ID="${3:-}"
+            PROP_SET_KV="${4:-}"
+            if [ -z "$PROP_SET_ID" ] || [ -z "$PROP_SET_KV" ]; then
+                echo "Usage: wall prop set <id> <key>=<value>" >&2
+                exit 1
+            fi
+            PROP_KEY="${PROP_SET_KV%%=*}"
+            PROP_VAL="${PROP_SET_KV#*=}"
+            mkdir -p "$PROPS_DIR"
+            PROP_FILE="$PROPS_DIR/$PROP_SET_ID"
+            if grep -q "^${PROP_KEY}=" "$PROP_FILE" 2>/dev/null; then
+                sed -i "s|^${PROP_KEY}=.*|${PROP_KEY}=${PROP_VAL}|" "$PROP_FILE"
+            else
+                echo "${PROP_KEY}=${PROP_VAL}" >> "$PROP_FILE"
+            fi
+            # restart on any active monitor
+            shopt -s nullglob
+            for _MON_PATH in "$MON_DIR"/*/; do
+                if [ -f "${_MON_PATH}current" ] && [ "$(cat "${_MON_PATH}current")" = "$PROP_SET_ID" ]; then
+                    _MON_NAME=$(basename "$_MON_PATH")
+                    send_cmd "run" "$PROP_SET_ID $_MON_NAME"
+                fi
+            done
+            shopt -u nullglob
+            ;;
+        *)
+            echo "Usage: wall prop set <id> <key>=<value>" >&2
+            exit 1
+            ;;
+    esac
 ;;
 
 version)
@@ -831,7 +925,7 @@ update)
     fi
     echo "Updating v$VERSION -> $LATEST_TAG..."
     _REPO_RAW="https://raw.githubusercontent.com/bbetter/wall/$LATEST_TAG"
-    for BIN in wall wall-picker; do
+    for BIN in wall wall-gui wall-picker; do
         curl -sL "$_REPO_RAW/bin/$BIN" -o "$HOME/.local/bin/$BIN.tmp"
         chmod +x "$HOME/.local/bin/$BIN.tmp"
         mv "$HOME/.local/bin/$BIN.tmp" "$HOME/.local/bin/$BIN"
@@ -937,6 +1031,8 @@ echo "  wall prev [monitor]"
 echo "  wall status"
 echo "  wall monitors"
 echo "  wall info <id>"
+echo "  wall props <id>"
+echo "  wall prop set <id> <key>=<value>"
 echo "  wall <id> [monitor]"
 echo "  wall list"
 echo "  wall stop [monitor]"
@@ -944,7 +1040,7 @@ echo "  wall set fps <integer>"
 echo "  wall set scaling <fill|fit|stretch|default>"
 echo "  wall log"
 echo "  wall cache [clear|rebuild]"
-echo "  wall update"
+echo "  wall update [--force]"
 echo "  wall version"
 ;;
 
