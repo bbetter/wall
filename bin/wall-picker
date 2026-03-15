@@ -55,9 +55,13 @@ def get_monitors():
         return ["*"]
 
 
+MEDIA_EXTS  = {".mp4", ".webm", ".gif"}
+STATIC_EXTS = {".jpg", ".jpeg", ".png"}
+
 def find_thumbnail(steam_lib, wall_id):
     base = os.path.join(steam_lib, "workshop", "content", "431960", wall_id)
-    for fname in ("preview.jpg", "preview.png", "preview.gif"):
+    for fname in ("preview.mp4", "preview.webm", "preview.gif",
+                  "preview.jpg", "preview.png"):
         path = os.path.join(base, fname)
         if os.path.exists(path):
             return path
@@ -83,10 +87,11 @@ class WallPicker(Gtk.ApplicationWindow):
         super().__init__(application=app, title="wall-picker")
         self.set_default_size(980, 600)
 
-        self.steam_lib   = get_steam_lib()
-        self.wallpapers  = load_wallpapers()
-        self.selected_id = None
-        self.monitors    = get_monitors()
+        self.steam_lib     = get_steam_lib()
+        self.wallpapers    = load_wallpapers()
+        self.selected_id   = None
+        self.monitors      = get_monitors()
+        self._current_media = None
 
         self._build_ui()
         self._populate_list()
@@ -261,12 +266,8 @@ class WallPicker(Gtk.ApplicationWindow):
         self.selected_id = wall["id"]
         self.apply_btn.set_sensitive(True)
 
-        # thumbnail
-        thumb = find_thumbnail(self.steam_lib, wall["id"])
-        if thumb:
-            self.thumbnail.set_filename(thumb)
-        else:
-            self.thumbnail.set_file(None)
+        # thumbnail / video preview
+        self._update_preview(wall["id"])
 
         # project.json details
         proj = load_project(self.steam_lib, wall["id"])
@@ -287,6 +288,30 @@ class WallPicker(Gtk.ApplicationWindow):
         self.tags_label.set_text(f"Tags: {tags}" if tags else "")
 
         self.id_label.set_text(f"ID: {wall['id']}")
+
+    def _update_preview(self, wall_id):
+        # Stop previous media
+        if self._current_media is not None:
+            self._current_media.pause()
+            self._current_media = None
+
+        thumb = find_thumbnail(self.steam_lib, wall_id)
+        if not thumb:
+            self.thumbnail.set_file(None)
+            return
+
+        ext = os.path.splitext(thumb)[1].lower()
+        if ext in MEDIA_EXTS:
+            try:
+                media = Gtk.MediaFile.new_for_filename(thumb)
+                media.set_loop(True)
+                media.play()
+                self.thumbnail.set_paintable(media)
+                self._current_media = media
+            except Exception:
+                self.thumbnail.set_filename(thumb)
+        else:
+            self.thumbnail.set_filename(thumb)
 
     def _on_activated(self, _listbox, row):
         """Double-click or Enter — apply immediately."""
