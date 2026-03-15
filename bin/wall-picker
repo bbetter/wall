@@ -200,6 +200,11 @@ class WallPicker(Gtk.ApplicationWindow):
             self.mon_drop.set_selected(len(self.monitors))
         action.append(self.mon_drop)
 
+        self.open_btn = Gtk.Button(label="Open in Steam")
+        self.open_btn.set_sensitive(False)
+        self.open_btn.connect("clicked", self._on_open_steam)
+        action.append(self.open_btn)
+
         self.share_btn = Gtk.Button(label="Share")
         self.share_btn.set_sensitive(False)
         self.share_btn.connect("clicked", self._on_share)
@@ -278,6 +283,7 @@ class WallPicker(Gtk.ApplicationWindow):
         self.selected_id = wall["id"]
         self.apply_btn.set_sensitive(True)
         self.share_btn.set_sensitive(True)
+        self.open_btn.set_sensitive(True)
 
         info = load_info(wall["id"])
 
@@ -326,11 +332,18 @@ class WallPicker(Gtk.ApplicationWindow):
             self.selected_id = row.wall["id"]
         self._on_apply(None)
 
+    def _steam_url(self):
+        return f"steam://url/CommunityFilePage/{self.selected_id}"
+
+    def _on_open_steam(self, _btn):
+        if not self.selected_id:
+            return
+        subprocess.Popen(["xdg-open", self._steam_url()])
+
     def _on_share(self, btn):
         if not self.selected_id:
             return
-        url = f"https://steamcommunity.com/sharedfiles/filedetails/?id={self.selected_id}"
-        Gdk.Display.get_default().get_clipboard().set(url)
+        Gdk.Display.get_default().get_clipboard().set(self._steam_url())
         btn.set_label("Copied!")
         GLib.timeout_add(1500, lambda: btn.set_label("Share") or False)
 
