@@ -204,7 +204,8 @@ for d in "$WORKSHOP_DIR"/*; do
 
 done | sort > "$tmp" && mv "$tmp" "$CACHE_FILE"
 
-log "List cache built ($(wc -l < "$CACHE_FILE") entries)"
+CACHE_COUNT=$(wc -l < "$CACHE_FILE")
+log "List cache built ($CACHE_COUNT entries)"
 
 }
 
@@ -903,9 +904,10 @@ cache)
         rebuild)
             wait_for_steam
             rm -f "$CACHE_FILE"
-            echo "Building cache…"
+            echo "Building cache..."
             build_list_cache
-            echo "Cache rebuilt ($(wc -l < "$CACHE_FILE") entries)"
+            CACHE_COUNT=$(wc -l < "$CACHE_FILE")
+            echo "Cache rebuilt ($CACHE_COUNT entries)"
             ;;
         *)
             echo "Usage: wall cache [clear|rebuild]"
