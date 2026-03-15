@@ -213,6 +213,7 @@ class WallGui(Gtk.ApplicationWindow):
         self._warn_label.set_halign(Gtk.Align.START)
         self._warn_label.set_wrap(True)
         self._warn_label.set_hexpand(True)
+        self._warn_label.set_use_markup(True)
         self._warn_label.add_css_class("warning")
         self._warn_box.append(self._warn_label)
 
@@ -406,7 +407,7 @@ class WallGui(Gtk.ApplicationWindow):
 
         warnings = info.get("warnings", [])
         if warnings:
-            self._warn_label.set_text(" · ".join(warnings))
+            self._warn_label.set_markup("<big><b>" + " · ".join(warnings) + "</b></big>")
             self._warn_box.set_visible(True)
         else:
             self._warn_box.set_visible(False)
@@ -652,7 +653,6 @@ class WallGui(Gtk.ApplicationWindow):
         item = self.mon_drop.get_selected_item()
         monitor = item.get_string() if item else "ALL"
         apply_wallpaper(self.selected_id, monitor)
-        self.close()
 
 
 ########################################
