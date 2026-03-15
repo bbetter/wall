@@ -198,7 +198,7 @@ for d in "$WORKSHOP_DIR"/*; do
             local FILE
             FILE=$(jq -r '.file // ""' "$d/project.json")
             [ -n "$FILE" ] && [ -f "$d/$FILE" ] || continue
-            printf "%s\t%s\t%s\n" "$ID" "$TITLE" "$TAGS"
+            printf "%s\t%s\t%s\t%s\n" "$ID" "$TITLE" "$TAGS" "$TYPE"
         ;;
     esac
 
@@ -706,10 +706,10 @@ for MON_PATH in "$MON_DIR"/*/; do
 done
 shopt -u nullglob
 
-while IFS=$'\t' read -r ID TITLE TAGS; do
+while IFS=$'\t' read -r ID TITLE TAGS TYPE; do
     MARKER=" "
     [ "${CURRENT_IDS[$ID]+_}" ] && MARKER="*"
-    printf "%s\t%s\t%s\t%s\n" "$MARKER" "$ID" "$TITLE" "$TAGS"
+    printf "%s\t%s\t%s\t%s\t%s\n" "$MARKER" "$ID" "$TITLE" "$TAGS" "$TYPE"
 done < "$CACHE_FILE"
 ;;
 
@@ -763,6 +763,29 @@ monitors)
     get_monitors
 ;;
 
+info)
+    INFO_ID="${2:-}"
+    if [ -z "$INFO_ID" ]; then
+        echo "Usage: wall info <id>" >&2
+        exit 1
+    fi
+    INFO_DIR="$WORKSHOP_DIR/$INFO_ID"
+    if [ ! -f "$INFO_DIR/project.json" ]; then
+        echo "{}" >&2
+        exit 1
+    fi
+    INFO_THUMB=""
+    for f in preview.mp4 preview.webm preview.gif preview.jpg preview.png; do
+        if [ -f "$INFO_DIR/$f" ]; then
+            INFO_THUMB="$INFO_DIR/$f"
+            break
+        fi
+    done
+    jq --arg id "$INFO_ID" --arg thumb "$INFO_THUMB" \
+        '. + {id: $id, thumbnail: $thumb}' \
+        "$INFO_DIR/project.json"
+;;
+
 version)
     echo "wall $VERSION"
 ;;
@@ -782,7 +805,7 @@ update)
     fi
     echo "Updating v$VERSION -> $LATEST_TAG..."
     _REPO_RAW="https://raw.githubusercontent.com/bbetter/wall/$LATEST_TAG"
-    for BIN in wall wall-picker wall-preview; do
+    for BIN in wall wall-picker; do
         curl -sL "$_REPO_RAW/bin/$BIN" -o "$HOME/.local/bin/$BIN"
         chmod +x "$HOME/.local/bin/$BIN"
         echo "  Updated $BIN"
@@ -875,6 +898,7 @@ echo "  wall next [monitor]"
 echo "  wall prev [monitor]"
 echo "  wall status"
 echo "  wall monitors"
+echo "  wall info <id>"
 echo "  wall <id> [monitor]"
 echo "  wall list"
 echo "  wall stop [monitor]"

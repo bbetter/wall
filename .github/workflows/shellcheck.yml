@@ -14,4 +14,4 @@ jobs:
         uses: ludeeus/action-shellcheck@master
         with:
           scandir: "."
-          additional_files: "bin/wall bin/wall-picker bin/wall-preview"
+          additional_files: "bin/wall bin/wall-picker"

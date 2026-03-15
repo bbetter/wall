@@ -14,8 +14,7 @@ Simple Wallpaper Engine launcher for Linux.
 - Daemon that keeps wallpapers running across sessions
 - Random, cycle, and shuffle modes with configurable intervals
 - Multi-monitor support with per-monitor control
-- `wall-picker` — fuzzy browse and search by title or tags
-- `wall-preview` — thumbnail preview before applying
+- `wall-picker` — GTK4 browser with thumbnail/video preview, search by title or tags
 - Works on **Hyprland**, **KDE**, and other Wayland compositors
 
 ---
@@ -68,6 +67,7 @@ The installer:
 | `wall list` | List all available wallpapers |
 | `wall status` | Show daemon and monitor status |
 | `wall monitors` | List connected monitors |
+| `wall info <id>` | Print full wallpaper metadata as JSON |
 | `wall stop [monitor]` | Stop wallpaper(s) and daemon |
 | `wall set <fps\|scaling> <value>` | Update a config setting and restart daemon |
 | `wall log` | Tail the daemon log (useful for debugging) |
@@ -148,5 +148,5 @@ Installed automatically:
 |---|---|
 | `linux-wallpaperengine` | Renders Wallpaper Engine scenes |
 | `jq` | Parses workshop metadata |
-| `fuzzel` | Fuzzy picker UI (`wall-picker`) |
-| `mpv` | Thumbnail preview (`wall-preview`) |
+| `python-gobject` + `gtk4` | GTK4 picker UI (`wall-picker`) |
+| `mpv` | Video preview in `wall-picker` (via GStreamer/GTK4) |
