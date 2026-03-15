@@ -2,7 +2,7 @@
 
 import gi
 gi.require_version('Gtk', '4.0')
-from gi.repository import Gtk, Pango
+from gi.repository import Gtk, Gdk, GLib, Pango
 
 import json
 import os
@@ -200,6 +200,11 @@ class WallPicker(Gtk.ApplicationWindow):
             self.mon_drop.set_selected(len(self.monitors))
         action.append(self.mon_drop)
 
+        self.share_btn = Gtk.Button(label="Share")
+        self.share_btn.set_sensitive(False)
+        self.share_btn.connect("clicked", self._on_share)
+        action.append(self.share_btn)
+
         self.apply_btn = Gtk.Button(label="Apply")
         self.apply_btn.add_css_class("suggested-action")
         self.apply_btn.set_hexpand(True)
@@ -272,6 +277,7 @@ class WallPicker(Gtk.ApplicationWindow):
         wall = row.wall
         self.selected_id = wall["id"]
         self.apply_btn.set_sensitive(True)
+        self.share_btn.set_sensitive(True)
 
         info = load_info(wall["id"])
 
@@ -319,6 +325,14 @@ class WallPicker(Gtk.ApplicationWindow):
         if row is not None:
             self.selected_id = row.wall["id"]
         self._on_apply(None)
+
+    def _on_share(self, btn):
+        if not self.selected_id:
+            return
+        url = f"https://steamcommunity.com/sharedfiles/filedetails/?id={self.selected_id}"
+        Gdk.Display.get_default().get_clipboard().set(url)
+        btn.set_label("Copied!")
+        GLib.timeout_add(1500, lambda: btn.set_label("Share") or False)
 
     def _on_apply(self, _btn):
         if not self.selected_id:
