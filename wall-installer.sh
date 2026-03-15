@@ -101,7 +101,7 @@ echo "Installing wall tools..."
 
 mkdir -p "$HOME/.local/bin"
 
-for BIN in wall wall-picker; do
+for BIN in wall wall-gui wall-picker; do
   echo "  Downloading $BIN..."
   curl -sL "$REPO_RAW/bin/$BIN" -o "$HOME/.local/bin/$BIN"
   chmod +x "$HOME/.local/bin/$BIN"
@@ -133,10 +133,12 @@ setup_posix_shell() {
   touch "$RC"
 
   if ! grep -q '\.local/bin' "$RC" 2>/dev/null; then
+    # shellcheck disable=SC2016
     echo 'export PATH="$HOME/.local/bin:$PATH"' >>"$RC"
   fi
 
   if ! grep -q 'alias wall=' "$RC" 2>/dev/null; then
+    # shellcheck disable=SC2016
     echo 'alias wall="$HOME/.local/bin/wall"' >>"$RC"
   fi
 }
@@ -148,6 +150,7 @@ if [ -d "$HOME/.config/fish" ]; then
   FISH_CONFIG="$HOME/.config/fish/config.fish"
   touch "$FISH_CONFIG"
   if ! grep -q '\.local/bin' "$FISH_CONFIG" 2>/dev/null; then
+    # shellcheck disable=SC2016
     echo 'fish_add_path $HOME/.local/bin' >>"$FISH_CONFIG"
   fi
   if ! grep -q 'alias wall' "$FISH_CONFIG" 2>/dev/null; then
