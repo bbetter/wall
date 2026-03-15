@@ -816,7 +816,7 @@ info)
             }' 2>/dev/null || echo "{}")
     fi
     INFO_PROPS=$(jq -c '[
-        .properties // {} | to_entries[]
+        (.general.properties // .properties // {}) | to_entries[]
         | select(.value.type != null and .value.type != "group")
         | {
             key: .key,
@@ -851,7 +851,7 @@ props)
         exit 0
     fi
     jq -c '[
-        .properties // {} | to_entries[]
+        (.general.properties // .properties // {}) | to_entries[]
         | select(.value.type != null and .value.type != "group")
         | {
             key: .key,
