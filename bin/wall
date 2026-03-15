@@ -817,7 +817,8 @@ info)
     fi
     INFO_PROPS=$(jq -c '[
         (.general.properties // .properties // {}) | to_entries[]
-        | select(.value.type != null and .value.type != "group")
+        | select(.value.type != null and .value.type != "group"
+            and (.value.text // "" | startswith("ui_") | not))
         | {
             key: .key,
             order: (.value.order // 999),
@@ -852,7 +853,8 @@ props)
     fi
     jq -c '[
         (.general.properties // .properties // {}) | to_entries[]
-        | select(.value.type != null and .value.type != "group")
+        | select(.value.type != null and .value.type != "group"
+            and (.value.text // "" | startswith("ui_") | not))
         | {
             key: .key,
             order: (.value.order // 999),
