@@ -6,10 +6,43 @@ from gi.repository import Gtk, Gdk, GLib, Pango
 
 import json
 import os
+import re
 import subprocess
 import shutil
 
 MEDIA_EXTS = {".mp4", ".webm", ".gif"}
+
+########################################
+# BBCODE → PANGO MARKUP
+########################################
+
+def bbcode_to_pango(text):
+    """Convert Wallpaper Engine BBCode to Pango markup for Gtk.Label."""
+    # Escape Pango XML special chars first
+    text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    # Tags that map directly to Pango
+    simple = [
+        (r'\[b\](.*?)\[/b\]',           r'<b>\1</b>'),
+        (r'\[i\](.*?)\[/i\]',           r'<i>\1</i>'),
+        (r'\[u\](.*?)\[/u\]',           r'<u>\1</u>'),
+        (r'\[s\](.*?)\[/s\]',           r'<s>\1</s>'),
+        (r'\[strike\](.*?)\[/strike\]', r'<s>\1</s>'),
+        (r'\[h[1-3]\](.*?)\[/h[1-3]\]', r'<b>\1</b>'),
+        (r'\[url=([^\]]+)\](.*?)\[/url\]', r'<a href="\1">\2</a>'),
+        (r'\[url\](.*?)\[/url\]',        r'<a href="\1">\1</a>'),
+        (r'\[img\].*?\[/img\]',          r''),
+        (r'\[noparse\](.*?)\[/noparse\]', r'\1'),
+        (r'\[list\]|\[/list\]',          r''),
+        (r'\[\*\]',                       r'• '),
+    ]
+    for pattern, repl in simple:
+        text = re.sub(pattern, repl, text, flags=re.DOTALL | re.IGNORECASE)
+
+    # Strip any remaining unknown [tags]
+    text = re.sub(r'\[/?[a-zA-Z][^\]]*\]', '', text)
+
+    return text.strip()
 
 ########################################
 # WALL CLI
@@ -218,6 +251,7 @@ class WallGui(Gtk.ApplicationWindow):
         self.desc_label.set_halign(Gtk.Align.START)
         self.desc_label.set_wrap(True)
         self.desc_label.set_max_width_chars(48)
+        self.desc_label.set_use_markup(True)
         right.append(self.desc_label)
 
         self.tags_label = Gtk.Label(label="")
@@ -402,7 +436,13 @@ class WallGui(Gtk.ApplicationWindow):
             self.resolution_label.set_text("")
 
         desc = info.get("description", "").strip()
-        self.desc_label.set_text(desc)
+        if desc:
+            try:
+                self.desc_label.set_markup(bbcode_to_pango(desc))
+            except Exception:
+                self.desc_label.set_text(desc)
+        else:
+            self.desc_label.set_text("")
         self.desc_label.set_visible(bool(desc))
 
         tags = ", ".join(info.get("tags", [])) or wall["tags"]
