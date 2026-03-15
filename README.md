@@ -33,7 +33,7 @@ Simple Wallpaper Engine launcher for Linux.
 ## Install
 
 ```bash
-curl -s https://raw.githubusercontent.com/bbetter/wall/main/wall-installer.sh | bash
+curl -sL https://github.com/bbetter/wall/releases/latest/download/wall-installer.sh | bash
 ```
 
 Or clone and run manually:

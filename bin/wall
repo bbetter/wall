@@ -190,15 +190,15 @@ for d in "$WORKSHOP_DIR"/*; do
     local ID
     ID=$(basename "$d")
 
-    local TITLE TYPE TAGS
-    IFS=$'\t' read -r TITLE TYPE TAGS <<< "$(jq -r '"\(.title)\t\((.type // "") | ascii_downcase)\t\([.tags[]? | tostring] | join(", "))"' "$d/project.json")"
+    local TITLE TYPE TAGS DESC
+    IFS=$'\t' read -r TITLE TYPE TAGS DESC <<< "$(jq -r '"\(.title)\t\((.type // "") | ascii_downcase)\t\([.tags[]? | tostring] | join(", "))\t\((.description // "") | gsub("\n"; " ") | gsub("\t"; " "))"' "$d/project.json")"
 
     case "$TYPE" in
         scene|video)
             local FILE
             FILE=$(jq -r '.file // ""' "$d/project.json")
             [ -n "$FILE" ] && [ -f "$d/$FILE" ] || continue
-            printf "%s\t%s\t%s\t%s\n" "$ID" "$TITLE" "$TAGS" "$TYPE"
+            printf "%s\t%s\t%s\t%s\t%s\n" "$ID" "$TITLE" "$TAGS" "$TYPE" "$DESC"
         ;;
     esac
 
@@ -706,10 +706,10 @@ for MON_PATH in "$MON_DIR"/*/; do
 done
 shopt -u nullglob
 
-while IFS=$'\t' read -r ID TITLE TAGS TYPE; do
+while IFS=$'\t' read -r ID TITLE TAGS TYPE DESC; do
     MARKER=" "
     [ "${CURRENT_IDS[$ID]+_}" ] && MARKER="*"
-    printf "%s\t%s\t%s\t%s\t%s\n" "$MARKER" "$ID" "$TITLE" "$TAGS" "$TYPE"
+    printf "%s\t%s\t%s\t%s\t%s\t%s\n" "$MARKER" "$ID" "$TITLE" "$TAGS" "$TYPE" "$DESC"
 done < "$CACHE_FILE"
 ;;
 
@@ -742,7 +742,12 @@ for MON_PATH in "$MON_DIR"/*/; do
         INTERVAL=$(cat "$CYCLE_FILE" 2>/dev/null || echo 300)
         echo "  mode:    $MODE (${INTERVAL}s)"
         if [ -n "$TICK" ]; then
-            echo "  next in: $(( TICK - $(date +%s) ))s"
+            REMAINING=$(( TICK - $(date +%s) ))
+            if [ "$REMAINING" -ge 60 ]; then
+                echo "  next in: $(( REMAINING / 60 ))m $(( REMAINING % 60 ))s"
+            else
+                echo "  next in: ${REMAINING}s"
+            fi
         fi
     else
         echo "  mode:    $MODE"
@@ -796,7 +801,7 @@ info)
     fi
     jq --arg id "$INFO_ID" --arg thumb "$INFO_THUMB" \
         --argjson video "$INFO_VIDEO" \
-        '. + {id: $id, thumbnail: $thumb, video: $video}' \
+        '. + {id: $id, thumbnail: $thumb} + (if $video != {} then {video: $video} else {} end)' \
         "$INFO_DIR/project.json"
 ;;
 
@@ -828,7 +833,15 @@ update)
 ;;
 
 log)
-    tail -f "$LOGFILE"
+    case "${2:-tail}" in
+        clear)
+            rm -f "$LOGFILE"
+            echo "Log cleared"
+            ;;
+        *)
+            tail -f "$LOGFILE"
+            ;;
+    esac
 ;;
 
 set)
@@ -890,6 +903,7 @@ cache)
         rebuild)
             wait_for_steam
             rm -f "$CACHE_FILE"
+            echo "Building cache…"
             build_list_cache
             echo "Cache rebuilt ($(wc -l < "$CACHE_FILE") entries)"
             ;;
