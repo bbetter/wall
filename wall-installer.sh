@@ -121,7 +121,8 @@ echo "STEAM_LIB=$STEAM_APPS" >"$CONFIG_FILE"
 
 setup_posix_shell() {
   local RC="$1"
-  [ -f "$RC" ] || return
+  # Create rc file if missing (e.g. fresh zsh install with no ~/.zshrc yet)
+  touch "$RC"
 
   if ! grep -q '\.local/bin' "$RC" 2>/dev/null; then
     echo 'export PATH="$HOME/.local/bin:$PATH"' >>"$RC"

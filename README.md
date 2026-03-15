@@ -66,6 +66,10 @@ The installer:
 | `wall status` | Show daemon and monitor status |
 | `wall monitors` | List connected monitors |
 | `wall stop [monitor]` | Stop wallpaper(s) and daemon |
+| `wall log` | Tail the daemon log (useful for debugging) |
+| `wall cache [clear\|rebuild]` | Manage the wallpaper metadata cache |
+| `wall update` | Update all wall scripts to latest version |
+| `wall version` | Print current version |
 | `wall-picker` | Interactive fuzzy picker |
 
 ---

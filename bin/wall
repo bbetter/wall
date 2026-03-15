@@ -130,7 +130,6 @@ shopt -u nullglob
 
 # Safety net for processes started before per-monitor PID tracking
 pkill -f linux-wallpaperengine 2>/dev/null
-pkill -f mpvpaper 2>/dev/null
 
 }
 
@@ -768,6 +767,39 @@ version)
     echo "wall $VERSION"
 ;;
 
+update)
+    echo "Updating wall..."
+    _REPO_RAW="https://raw.githubusercontent.com/bbetter/wall/main"
+    for BIN in wall wall-picker wall-preview; do
+        curl -sL "$_REPO_RAW/bin/$BIN" -o "$HOME/.local/bin/$BIN"
+        chmod +x "$HOME/.local/bin/$BIN"
+        echo "  Updated $BIN"
+    done
+    echo "Done."
+;;
+
+log)
+    tail -f "$LOGFILE"
+;;
+
+cache)
+    case "${2:-rebuild}" in
+        clear)
+            rm -f "$CACHE_FILE"
+            echo "Cache cleared"
+            ;;
+        rebuild)
+            wait_for_steam
+            rm -f "$CACHE_FILE"
+            build_list_cache
+            echo "Cache rebuilt ($(wc -l < "$CACHE_FILE") entries)"
+            ;;
+        *)
+            echo "Usage: wall cache [clear|rebuild]"
+            ;;
+    esac
+;;
+
 [0-9]*)
     send_cmd "run" "$1${2:+ $2}"
 ;;
@@ -784,6 +816,9 @@ echo "  wall monitors"
 echo "  wall <id> [monitor]"
 echo "  wall list"
 echo "  wall stop [monitor]"
+echo "  wall log"
+echo "  wall cache [clear|rebuild]"
+echo "  wall update"
 echo "  wall version"
 ;;
 
