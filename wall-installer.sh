@@ -2,8 +2,10 @@
 
 set -e
 
+REPO_RAW="https://raw.githubusercontent.com/bbetter/wall/main"
+
 echo
-echo "Steam Wallpaper Installer"
+echo "wall installer"
 echo
 
 ########################################
@@ -11,9 +13,9 @@ echo
 ########################################
 
 if ! command -v yay >/dev/null; then
-    echo "ERROR: yay not found"
-    echo "Install yay first."
-    exit 1
+  echo "ERROR: yay not found"
+  echo "Install yay first: https://github.com/Jguer/yay"
+  exit 1
 fi
 
 ########################################
@@ -23,10 +25,10 @@ fi
 echo "Installing dependencies..."
 
 yay -S --needed \
-    jq \
-    mpvpaper \
-    linux-wallpaperengine \
-    fuzzel
+  jq \
+  mpv \
+  linux-wallpaperengine \
+  fuzzel
 
 ########################################
 # detect SteamLibrary
@@ -38,9 +40,9 @@ echo "Searching for Steam libraries..."
 declare -a LIBS
 
 check_lib() {
-    if [ -d "$1/steamapps/workshop/content/431960" ]; then
-        LIBS+=("$1")
-    fi
+  if [ -d "$1/steamapps/workshop/content/431960" ]; then
+    LIBS+=("$1")
+  fi
 }
 
 check_lib "$HOME/.local/share/Steam"
@@ -48,11 +50,11 @@ check_lib "$HOME/.steam/steam"
 check_lib "$HOME/SteamLibrary"
 
 for d in /media/*/*/SteamLibrary; do
-    [ -d "$d" ] && check_lib "$d"
+  [ -d "$d" ] && check_lib "$d"
 done
 
 for d in /run/media/*/*/SteamLibrary; do
-    [ -d "$d" ] && check_lib "$d"
+  [ -d "$d" ] && check_lib "$d"
 done
 
 ########################################
@@ -61,24 +63,22 @@ done
 
 if [ "${#LIBS[@]}" -eq 0 ]; then
 
-    echo
-    echo "No SteamLibrary detected."
-
-    read -p "Enter SteamLibrary path manually: " STEAM_PATH
+  echo
+  echo "No SteamLibrary detected."
+  read -rp "Enter SteamLibrary path manually: " STEAM_PATH
 
 elif [ "${#LIBS[@]}" -eq 1 ]; then
 
-    STEAM_PATH="${LIBS[0]}"
-    echo "Found SteamLibrary:"
-    echo "  $STEAM_PATH"
+  STEAM_PATH="${LIBS[0]}"
+  echo "Found: $STEAM_PATH"
 
 else
 
-    echo
-    echo "Multiple Steam libraries detected:"
-    select STEAM_PATH in "${LIBS[@]}"; do
-        break
-    done
+  echo
+  echo "Multiple Steam libraries detected:"
+  select STEAM_PATH in "${LIBS[@]}"; do
+    break
+  done
 
 fi
 
@@ -93,13 +93,11 @@ echo "Installing wall tools..."
 
 mkdir -p "$HOME/.local/bin"
 
-cp bin/wall "$HOME/.local/bin/wall"
-cp bin/wall-picker "$HOME/.local/bin/wall-picker"
-cp bin/wall-preview "$HOME/.local/bin/wall-preview"
-
-chmod +x "$HOME/.local/bin/wall"
-chmod +x "$HOME/.local/bin/wall-picker"
-chmod +x "$HOME/.local/bin/wall-preview"
+for BIN in wall wall-picker wall-preview; do
+  echo "  Downloading $BIN..."
+  curl -sL "$REPO_RAW/bin/$BIN" -o "$HOME/.local/bin/$BIN"
+  chmod +x "$HOME/.local/bin/$BIN"
+done
 
 ########################################
 # config
@@ -112,39 +110,75 @@ mkdir -p "$CONFIG_DIR"
 
 echo "Writing config..."
 
-echo "STEAM_LIB=$STEAM_APPS" > "$CONFIG_FILE"
+echo "STEAM_LIB=$STEAM_APPS" >"$CONFIG_FILE"
 
 ########################################
-# KDE autostart
+# shell setup (PATH + alias)
+# /usr/bin/wall conflict: a binary named
+# 'wall' already exists on Linux systems.
+# We alias it to our version in each shell.
 ########################################
 
-AUTOSTART_DIR="$HOME/.config/autostart"
-AUTOSTART_FILE="$AUTOSTART_DIR/wall.desktop"
+setup_posix_shell() {
+  local RC="$1"
+  [ -f "$RC" ] || return
 
-mkdir -p "$AUTOSTART_DIR"
+  if ! grep -q '\.local/bin' "$RC" 2>/dev/null; then
+    echo 'export PATH="$HOME/.local/bin:$PATH"' >>"$RC"
+  fi
 
-cat > "$AUTOSTART_FILE" <<EOF
-[Desktop Entry]
-Type=Application
-Name=Steam Wallpaper
-Exec=wall random
-X-KDE-Autostart-enabled=true
-EOF
+  if ! grep -q 'alias wall=' "$RC" 2>/dev/null; then
+    echo 'alias wall="$HOME/.local/bin/wall"' >>"$RC"
+  fi
+}
 
-########################################
-# PATH
-########################################
+setup_posix_shell "$HOME/.bashrc"
+setup_posix_shell "$HOME/.zshrc"
 
-if ! grep -q ".local/bin" "$HOME/.bashrc" 2>/dev/null; then
-    echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.bashrc"
+if [ -d "$HOME/.config/fish" ]; then
+  FISH_CONFIG="$HOME/.config/fish/config.fish"
+  touch "$FISH_CONFIG"
+  if ! grep -q '\.local/bin' "$FISH_CONFIG" 2>/dev/null; then
+    echo 'fish_add_path $HOME/.local/bin' >>"$FISH_CONFIG"
+  fi
+  if ! grep -q 'alias wall' "$FISH_CONFIG" 2>/dev/null; then
+    echo "alias wall='$HOME/.local/bin/wall'" >>"$FISH_CONFIG"
+  fi
 fi
 
 ########################################
-# fix /usr/bin/wall conflict
+# autostart
 ########################################
 
-if ! grep -q 'alias wall=' "$HOME/.bashrc" 2>/dev/null; then
-    echo 'alias wall="$HOME/.local/bin/wall"' >> "$HOME/.bashrc"
+echo
+echo "Setting up autostart..."
+
+HYPR_CONF="$HOME/.config/hypr/hyprland.conf"
+
+if [ -f "$HYPR_CONF" ]; then
+
+  if ! grep -q 'exec-once.*wall' "$HYPR_CONF" 2>/dev/null; then
+    echo "exec-once = wall random" >>"$HYPR_CONF"
+    echo "  Added exec-once to hyprland.conf"
+  else
+    echo "  Hyprland autostart already present"
+  fi
+
+else
+
+  AUTOSTART_DIR="$HOME/.config/autostart"
+  mkdir -p "$AUTOSTART_DIR"
+
+  cat >"$AUTOSTART_DIR/wall.desktop" <<EOF
+[Desktop Entry]
+Type=Application
+Name=wall
+Exec=$HOME/.local/bin/wall random
+X-KDE-Autostart-enabled=true
+EOF
+
+  echo "  Created $AUTOSTART_DIR/wall.desktop"
+
 fi
 
 ########################################
@@ -154,22 +188,15 @@ fi
 echo
 echo "Installation complete!"
 echo
-echo "SteamLibrary:"
-echo "  $STEAM_PATH"
+echo "  SteamLibrary: $STEAM_PATH"
 echo
 echo "Commands:"
-echo
 echo "  wall random"
 echo "  wall list"
 echo "  wall-picker"
 echo
-echo "Recommended shortcut:"
+echo "Reload your shell:"
+echo "  source ~/.bashrc              # bash"
+echo "  source ~/.zshrc               # zsh"
+echo "  source ~/.config/fish/config.fish  # fish"
 echo
-echo "  Command: wall-picker"
-echo "  Shortcut: Meta + Shift + ."
-echo
-echo "Restart terminal or run:"
-echo
-echo "  source ~/.bashrc"
-echo
-

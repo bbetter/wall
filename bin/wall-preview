@@ -1,15 +1,9 @@
 #!/usr/bin/env bash
 
-LOG="/tmp/wall-debug.log"
-
-echo "preview start id=$1" >> "$LOG"
-
 CONFIG="$HOME/.config/wall/config"
 [ -f "$CONFIG" ] && source "$CONFIG"
 
 DIR="$STEAM_LIB/workshop/content/431960/$1"
-
-echo "dir=$DIR" >> "$LOG"
 
 for f in preview.mp4 preview.webm preview.gif preview.jpg preview.png; do
     if [ -f "$DIR/$f" ]; then
@@ -18,16 +12,9 @@ for f in preview.mp4 preview.webm preview.gif preview.jpg preview.png; do
     fi
 done
 
-echo "preview file=$PREVIEW" >> "$LOG"
-
 pkill -f "mpv --title=wall-preview" 2>/dev/null
 
-[ -z "$PREVIEW" ] && {
-    echo "no preview found" >> "$LOG"
-    exit
-}
-
-echo "launching mpv" >> "$LOG"
+[ -z "$PREVIEW" ] && exit
 
 mpv \
   --title=wall-preview \
@@ -37,6 +24,3 @@ mpv \
   --autofit=640x360 \
   --image-display-duration=inf \
   "$PREVIEW" &
-
-echo "mpv launched" >> "$LOG"
-

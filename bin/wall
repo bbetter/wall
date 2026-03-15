@@ -4,6 +4,8 @@
 # CONFIG
 ########################################
 
+VERSION="0.1.0"
+
 CONFIG_FILE="$HOME/.config/wall/config"
 
 [ -f "$CONFIG_FILE" ] && source "$CONFIG_FILE"
@@ -762,6 +764,10 @@ monitors)
     get_monitors
 ;;
 
+version)
+    echo "wall $VERSION"
+;;
+
 [0-9]*)
     send_cmd "run" "$1${2:+ $2}"
 ;;
@@ -774,9 +780,11 @@ echo "  wall shuffle [seconds] [monitor]"
 echo "  wall next [monitor]"
 echo "  wall prev [monitor]"
 echo "  wall status"
+echo "  wall monitors"
 echo "  wall <id> [monitor]"
 echo "  wall list"
 echo "  wall stop [monitor]"
+echo "  wall version"
 ;;
 
 esac
