@@ -2,8 +2,9 @@
 
 import gi
 gi.require_version('Gtk', '4.0')
-from gi.repository import Gtk, GLib, Gdk, Pango
+from gi.repository import Gtk, Pango
 
+import json
 import os
 import subprocess
 import shutil
@@ -63,6 +64,15 @@ def find_thumbnail(steam_lib, wall_id):
     return None
 
 
+def load_project(steam_lib, wall_id):
+    path = os.path.join(steam_lib, "workshop", "content", "431960", wall_id, "project.json")
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
 ########################################
 # WINDOW
 ########################################
@@ -71,12 +81,12 @@ class WallPicker(Gtk.ApplicationWindow):
 
     def __init__(self, app):
         super().__init__(application=app, title="wall-picker")
-        self.set_default_size(960, 580)
+        self.set_default_size(980, 600)
 
-        self.steam_lib    = get_steam_lib()
-        self.wallpapers   = load_wallpapers()
-        self.selected_id  = None
-        self.monitors     = get_monitors()
+        self.steam_lib   = get_steam_lib()
+        self.wallpapers  = load_wallpapers()
+        self.selected_id = None
+        self.monitors    = get_monitors()
 
         self._build_ui()
         self._populate_list()
@@ -99,8 +109,7 @@ class WallPicker(Gtk.ApplicationWindow):
         self.search.connect("search-changed", lambda _: self.listbox.invalidate_filter())
         root.append(self.search)
 
-        sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
-        root.append(sep)
+        root.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
 
         # ---- paned ----
         paned = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
@@ -108,46 +117,76 @@ class WallPicker(Gtk.ApplicationWindow):
         paned.set_position(340)
         root.append(paned)
 
-        # left pane — list
+        # left pane — list (click to preview only)
         scroll = Gtk.ScrolledWindow()
         scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         self.listbox = Gtk.ListBox()
         self.listbox.set_selection_mode(Gtk.SelectionMode.SINGLE)
+        self.listbox.set_activate_on_single_click(False)  # single click = select, double click = activate
         self.listbox.set_filter_func(self._filter)
-        self.listbox.connect("row-selected", self._on_selected)
-        self.listbox.connect("row-activated", self._on_activated)
+        self.listbox.connect("row-selected", self._on_selected)   # preview on click
+        self.listbox.connect("row-activated", self._on_activated)  # apply on double-click / Enter
         scroll.set_child(self.listbox)
         paned.set_start_child(scroll)
         paned.set_shrink_start_child(False)
 
-        # right pane — preview
+        # right pane — details
+        right_scroll = Gtk.ScrolledWindow()
+        right_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        right_scroll.set_hexpand(True)
+
         right = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
         right.set_margin_top(16)
         right.set_margin_bottom(16)
         right.set_margin_start(16)
         right.set_margin_end(16)
-        right.set_hexpand(True)
-        paned.set_end_child(right)
+        right_scroll.set_child(right)
+        paned.set_end_child(right_scroll)
         paned.set_shrink_end_child(False)
 
+        # thumbnail
         self.thumbnail = Gtk.Picture()
         self.thumbnail.set_size_request(-1, 220)
         self.thumbnail.set_content_fit(Gtk.ContentFit.CONTAIN)
         self.thumbnail.set_can_shrink(True)
         right.append(self.thumbnail)
 
+        # title
         self.title_label = Gtk.Label(label="Select a wallpaper")
         self.title_label.set_halign(Gtk.Align.START)
         self.title_label.set_wrap(True)
         self.title_label.add_css_class("title-3")
         right.append(self.title_label)
 
+        # type + visibility row
+        meta_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        right.append(meta_row)
+
+        self.type_label = Gtk.Label(label="")
+        self.type_label.set_halign(Gtk.Align.START)
+        self.type_label.add_css_class("dim-label")
+        meta_row.append(self.type_label)
+
+        self.visibility_label = Gtk.Label(label="")
+        self.visibility_label.set_halign(Gtk.Align.START)
+        self.visibility_label.add_css_class("dim-label")
+        meta_row.append(self.visibility_label)
+
+        # description
+        self.desc_label = Gtk.Label(label="")
+        self.desc_label.set_halign(Gtk.Align.START)
+        self.desc_label.set_wrap(True)
+        self.desc_label.set_max_width_chars(48)
+        right.append(self.desc_label)
+
+        # tags
         self.tags_label = Gtk.Label(label="")
         self.tags_label.set_halign(Gtk.Align.START)
         self.tags_label.set_wrap(True)
         self.tags_label.add_css_class("dim-label")
         right.append(self.tags_label)
 
+        # workshop id
         self.id_label = Gtk.Label(label="")
         self.id_label.set_halign(Gtk.Align.START)
         self.id_label.add_css_class("dim-label")
@@ -214,25 +253,45 @@ class WallPicker(Gtk.ApplicationWindow):
         w = row.wall
         return query in w["title"].lower() or query in w["tags"].lower()
 
-    def _on_selected(self, listbox, row):
+    def _on_selected(self, _listbox, row):
+        """Single click — update preview panel only."""
         if row is None:
             return
         wall = row.wall
         self.selected_id = wall["id"]
-        self.title_label.set_text(wall["title"])
-        self.tags_label.set_text(wall["tags"])
-        self.id_label.set_text(f"ID: {wall['id']}")
         self.apply_btn.set_sensitive(True)
 
+        # thumbnail
         thumb = find_thumbnail(self.steam_lib, wall["id"])
         if thumb:
             self.thumbnail.set_filename(thumb)
         else:
             self.thumbnail.set_file(None)
 
-    def _on_activated(self, listbox, row):
-        """Enter or double-click applies immediately."""
-        self._on_selected(listbox, row)
+        # project.json details
+        proj = load_project(self.steam_lib, wall["id"])
+
+        self.title_label.set_text(proj.get("title", wall["title"]))
+
+        wp_type = proj.get("type", "").capitalize()
+        self.type_label.set_text(wp_type)
+
+        visibility = proj.get("visibility", "")
+        self.visibility_label.set_text(f"· {visibility}" if visibility else "")
+
+        desc = proj.get("description", "").strip()
+        self.desc_label.set_text(desc)
+        self.desc_label.set_visible(bool(desc))
+
+        tags = ", ".join(proj.get("tags", [])) or wall["tags"]
+        self.tags_label.set_text(f"Tags: {tags}" if tags else "")
+
+        self.id_label.set_text(f"ID: {wall['id']}")
+
+    def _on_activated(self, _listbox, row):
+        """Double-click or Enter — apply immediately."""
+        if row is not None:
+            self.selected_id = row.wall["id"]
         self._on_apply(None)
 
     def _on_apply(self, _btn):
