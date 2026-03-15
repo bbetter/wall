@@ -4,7 +4,7 @@
 # CONFIG
 ########################################
 
-VERSION="0.4.1"
+VERSION="0.4.0"
 
 CONFIG_FILE="$HOME/.config/wall/config"
 
@@ -811,6 +811,12 @@ version)
 ;;
 
 update)
+    _FORCE=false
+    for _arg in "${@:2}"; do
+        case "$_arg" in
+            --force|--fresh) _FORCE=true ;;
+        esac
+    done
     echo "Checking for updates..."
     LATEST_TAG=$(curl -s "https://api.github.com/repos/bbetter/wall/releases/latest" \
         | jq -r '.tag_name // empty')
@@ -819,7 +825,7 @@ update)
         exit 1
     fi
     LATEST_VER="${LATEST_TAG#v}"
-    if [ "$LATEST_VER" = "$VERSION" ]; then
+    if [ "$_FORCE" = false ] && [ "$LATEST_VER" = "$VERSION" ]; then
         echo "Already up to date (v$VERSION)"
         exit 0
     fi
