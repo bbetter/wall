@@ -34,7 +34,7 @@ Simple Wallpaper Engine launcher for Linux.
 ## Install
 
 ```bash
-bash <(curl -s https://raw.githubusercontent.com/bbetter/wall/main/wall-installer.sh)
+curl -s https://raw.githubusercontent.com/bbetter/wall/main/wall-installer.sh | bash
 ```
 
 Or clone and run manually:

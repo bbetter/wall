@@ -4,7 +4,7 @@
 # CONFIG
 ########################################
 
-VERSION="0.2.0"
+VERSION="0.2.1"
 
 CONFIG_FILE="$HOME/.config/wall/config"
 
@@ -722,7 +722,7 @@ is_running \
     || echo "daemon:  stopped"
 echo
 
-local -A ACTIVE_MONS
+declare -A ACTIVE_MONS
 while IFS= read -r m; do ACTIVE_MONS["$m"]=1; done < <(get_monitors)
 
 shopt -s nullglob
