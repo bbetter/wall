@@ -148,5 +148,5 @@ Installed automatically:
 |---|---|
 | `linux-wallpaperengine` | Renders Wallpaper Engine scenes |
 | `jq` | Parses workshop metadata |
-| `fuzzel` | Fuzzy picker UI (`wall-picker`) |
+| `python-gobject` + `gtk4` | GTK4 picker UI (`wall-picker`) |
 | `mpv` | Thumbnail preview (`wall-preview`) |

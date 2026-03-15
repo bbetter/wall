@@ -1,65 +1,265 @@
-#!/usr/bin/env bash
+#!/usr/bin/env python3
 
-WALL=$(command -v wall 2>/dev/null || echo "$HOME/.local/bin/wall")
+import gi
+gi.require_version('Gtk', '4.0')
+from gi.repository import Gtk, GLib, Gdk, Pango
 
-truncate_title() {
+import os
+import subprocess
+import shutil
 
-TITLE="$1"
-MAX=40
+CONFIG_FILE = os.path.expanduser("~/.config/wall/config")
+CACHE_FILE  = os.path.expanduser("~/.cache/wall/list.cache")
 
-if [ ${#TITLE} -gt $MAX ]; then
-    echo "${TITLE:0:$MAX}…"
-else
-    echo "$TITLE"
-fi
+########################################
+# HELPERS
+########################################
 
-}
+def get_steam_lib():
+    if os.path.exists(CONFIG_FILE):
+        with open(CONFIG_FILE) as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith("STEAM_LIB="):
+                    return line.split("=", 1)[1].strip()
+    return os.path.expanduser("~/.local/share/Steam/steamapps")
 
-build_list() {
 
-"$WALL" list | while IFS=$'\t' read -r MARKER ID TITLE TAGS; do
+def load_wallpapers():
+    walls = []
+    if not os.path.exists(CACHE_FILE):
+        return walls
+    with open(CACHE_FILE) as f:
+        for line in f:
+            parts = line.rstrip("\n").split("\t")
+            if len(parts) >= 2:
+                walls.append({
+                    "id":    parts[0],
+                    "title": parts[1],
+                    "tags":  parts[2] if len(parts) > 2 else "",
+                })
+    return walls
 
-    TITLE=$(truncate_title "$TITLE")
 
-    printf "%s %-40s %s\t%s\n" \
-        "$MARKER" \
-        "$TITLE" \
-        "$TAGS" \
-        "$ID"
+def get_wall_bin():
+    return shutil.which("wall") or os.path.expanduser("~/.local/bin/wall")
 
-done
 
-}
+def get_monitors():
+    try:
+        result = subprocess.run([get_wall_bin(), "monitors"], capture_output=True, text=True)
+        mons = [m.strip() for m in result.stdout.strip().splitlines() if m.strip()]
+        return mons if mons else ["*"]
+    except Exception:
+        return ["*"]
 
-ID=$(build_list | fuzzel \
-    --dmenu \
-    --width 120 \
-    --lines 20 \
-    --with-nth=1 \
-    --accept-nth=2)
 
-[ -z "$ID" ] && exit
+def find_thumbnail(steam_lib, wall_id):
+    base = os.path.join(steam_lib, "workshop", "content", "431960", wall_id)
+    for fname in ("preview.jpg", "preview.png", "preview.gif"):
+        path = os.path.join(base, fname)
+        if os.path.exists(path):
+            return path
+    return None
 
-mapfile -t MONS < <("$WALL" monitors)
 
-if [ "${#MONS[@]}" -le 1 ]; then
+########################################
+# WINDOW
+########################################
 
-    "$WALL" "$ID"
+class WallPicker(Gtk.ApplicationWindow):
 
-else
+    def __init__(self, app):
+        super().__init__(application=app, title="wall-picker")
+        self.set_default_size(960, 580)
 
-    MON=$(printf "%s\n" "${MONS[@]}" ALL | fuzzel \
-        --dmenu \
-        --width 40 \
-        --lines $(( ${#MONS[@]} + 1 )))
+        self.steam_lib    = get_steam_lib()
+        self.wallpapers   = load_wallpapers()
+        self.selected_id  = None
+        self.monitors     = get_monitors()
 
-    [ -z "$MON" ] && exit
+        self._build_ui()
+        self._populate_list()
 
-    if [ "$MON" = "ALL" ]; then
-        "$WALL" "$ID"
-    else
-        "$WALL" "$ID" "$MON"
-    fi
+    # --------------------------------------------------
+    # UI
+    # --------------------------------------------------
 
-fi
+    def _build_ui(self):
+        root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self.set_child(root)
 
+        # ---- search bar ----
+        self.search = Gtk.SearchEntry()
+        self.search.set_placeholder_text("Search by title or tags…")
+        self.search.set_margin_top(8)
+        self.search.set_margin_bottom(8)
+        self.search.set_margin_start(8)
+        self.search.set_margin_end(8)
+        self.search.connect("search-changed", lambda _: self.listbox.invalidate_filter())
+        root.append(self.search)
+
+        sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+        root.append(sep)
+
+        # ---- paned ----
+        paned = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
+        paned.set_vexpand(True)
+        paned.set_position(340)
+        root.append(paned)
+
+        # left pane — list
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        self.listbox = Gtk.ListBox()
+        self.listbox.set_selection_mode(Gtk.SelectionMode.SINGLE)
+        self.listbox.set_filter_func(self._filter)
+        self.listbox.connect("row-selected", self._on_selected)
+        self.listbox.connect("row-activated", self._on_activated)
+        scroll.set_child(self.listbox)
+        paned.set_start_child(scroll)
+        paned.set_shrink_start_child(False)
+
+        # right pane — preview
+        right = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        right.set_margin_top(16)
+        right.set_margin_bottom(16)
+        right.set_margin_start(16)
+        right.set_margin_end(16)
+        right.set_hexpand(True)
+        paned.set_end_child(right)
+        paned.set_shrink_end_child(False)
+
+        self.thumbnail = Gtk.Picture()
+        self.thumbnail.set_size_request(-1, 220)
+        self.thumbnail.set_content_fit(Gtk.ContentFit.CONTAIN)
+        self.thumbnail.set_can_shrink(True)
+        right.append(self.thumbnail)
+
+        self.title_label = Gtk.Label(label="Select a wallpaper")
+        self.title_label.set_halign(Gtk.Align.START)
+        self.title_label.set_wrap(True)
+        self.title_label.add_css_class("title-3")
+        right.append(self.title_label)
+
+        self.tags_label = Gtk.Label(label="")
+        self.tags_label.set_halign(Gtk.Align.START)
+        self.tags_label.set_wrap(True)
+        self.tags_label.add_css_class("dim-label")
+        right.append(self.tags_label)
+
+        self.id_label = Gtk.Label(label="")
+        self.id_label.set_halign(Gtk.Align.START)
+        self.id_label.add_css_class("dim-label")
+        right.append(self.id_label)
+
+        # spacer
+        spacer = Gtk.Box()
+        spacer.set_vexpand(True)
+        right.append(spacer)
+
+        # monitor selector + apply
+        action = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        right.append(action)
+
+        mon_list = Gtk.StringList.new(self.monitors + (["ALL"] if len(self.monitors) > 1 else []))
+        self.mon_drop = Gtk.DropDown(model=mon_list)
+        if len(self.monitors) > 1:
+            self.mon_drop.set_selected(len(self.monitors))  # default: ALL
+        action.append(self.mon_drop)
+
+        self.apply_btn = Gtk.Button(label="Apply")
+        self.apply_btn.add_css_class("suggested-action")
+        self.apply_btn.set_hexpand(True)
+        self.apply_btn.set_sensitive(False)
+        self.apply_btn.connect("clicked", self._on_apply)
+        action.append(self.apply_btn)
+
+        self.search.grab_focus()
+
+    def _populate_list(self):
+        for wall in self.wallpapers:
+            row = Gtk.ListBoxRow()
+            row.wall = wall
+
+            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+            box.set_margin_top(6)
+            box.set_margin_bottom(6)
+            box.set_margin_start(12)
+            box.set_margin_end(12)
+
+            title = Gtk.Label(label=wall["title"])
+            title.set_halign(Gtk.Align.START)
+            title.set_ellipsize(Pango.EllipsizeMode.END)
+            box.append(title)
+
+            if wall["tags"]:
+                tags = Gtk.Label(label=wall["tags"])
+                tags.set_halign(Gtk.Align.START)
+                tags.set_ellipsize(Pango.EllipsizeMode.END)
+                tags.add_css_class("dim-label")
+                tags.set_scale(0.85)
+                box.append(tags)
+
+            row.set_child(box)
+            self.listbox.append(row)
+
+    # --------------------------------------------------
+    # CALLBACKS
+    # --------------------------------------------------
+
+    def _filter(self, row):
+        query = self.search.get_text().lower()
+        if not query:
+            return True
+        w = row.wall
+        return query in w["title"].lower() or query in w["tags"].lower()
+
+    def _on_selected(self, listbox, row):
+        if row is None:
+            return
+        wall = row.wall
+        self.selected_id = wall["id"]
+        self.title_label.set_text(wall["title"])
+        self.tags_label.set_text(wall["tags"])
+        self.id_label.set_text(f"ID: {wall['id']}")
+        self.apply_btn.set_sensitive(True)
+
+        thumb = find_thumbnail(self.steam_lib, wall["id"])
+        if thumb:
+            self.thumbnail.set_filename(thumb)
+        else:
+            self.thumbnail.set_file(None)
+
+    def _on_activated(self, listbox, row):
+        """Enter or double-click applies immediately."""
+        self._on_selected(listbox, row)
+        self._on_apply(None)
+
+    def _on_apply(self, _btn):
+        if not self.selected_id:
+            return
+        item = self.mon_drop.get_selected_item()
+        monitor = item.get_string() if item else "ALL"
+        cmd = [get_wall_bin(), self.selected_id]
+        if monitor != "ALL":
+            cmd.append(monitor)
+        subprocess.Popen(cmd)
+        self.close()
+
+
+########################################
+# APP
+########################################
+
+class App(Gtk.Application):
+    def __init__(self):
+        super().__init__(application_id="com.github.bbetter.wall-picker")
+
+    def do_activate(self):
+        win = WallPicker(self)
+        win.present()
+
+
+if __name__ == "__main__":
+    App().run(None)

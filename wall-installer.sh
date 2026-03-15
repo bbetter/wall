@@ -34,7 +34,8 @@ yay -S --needed \
   jq \
   mpv \
   linux-wallpaperengine \
-  fuzzel
+  python-gobject \
+  gtk4
 
 ########################################
 # detect SteamLibrary
