@@ -4,7 +4,7 @@
 # CONFIG
 ########################################
 
-VERSION="0.6.0"
+VERSION="0.7.0"
 
 CONFIG_FILE="$HOME/.config/wall/config"
 
@@ -30,6 +30,7 @@ EXCLUDED_FILE="$HOME/.config/wall/excluded"
 
 FPS=60
 SCALING=fill
+AUDIO=0
 
 mkdir -p "$STATE_DIR" "$MON_DIR"
 
@@ -166,13 +167,16 @@ if [ -f "$PROP_FILE" ]; then
     done < "$PROP_FILE"
 fi
 
+local AUDIO_FLAGS=()
+[ "${AUDIO:-0}" = "0" ] && AUDIO_FLAGS=(--silent)
+
 linux-wallpaperengine \
     "$DIR" \
     --assets-dir "$ASSETS" \
     --screen-root "$MON" \
     --scaling "$SCALING" \
     --fps "$FPS" \
-    --disable-audio \
+    "${AUDIO_FLAGS[@]}" \
     "${PROP_FLAGS[@]}" &
 
 local LAUNCHED_PID=$!
@@ -824,13 +828,14 @@ info)
     fi
     INFO_PROPS=$(jq -c '[
         (.general.properties // .properties // {}) | to_entries[]
+        | .key as $pkey
         | select(.value.type != null and .value.type != "group"
             and (.value.text // "" | startswith("ui_") | not))
         | {
-            key: .key,
+            key: $pkey,
             order: (.value.order // 999),
             type: .value.type,
-            label: (.value.text // .key),
+            label: ((.value.text // $pkey) | gsub("<[^>]*>"; "") | gsub("^\\s+|\\s+$"; "") | gsub("\\s{2,}"; " ") | if . == "" then $pkey else . end),
             value: (.value.value | tostring),
             min:     (if .value.min     != null then (.value.min     | tostring) else null end),
             max:     (if .value.max     != null then (.value.max     | tostring) else null end),
@@ -884,13 +889,14 @@ props)
     fi
     jq -c '[
         (.general.properties // .properties // {}) | to_entries[]
+        | .key as $pkey
         | select(.value.type != null and .value.type != "group"
             and (.value.text // "" | startswith("ui_") | not))
         | {
-            key: .key,
+            key: $pkey,
             order: (.value.order // 999),
             type: .value.type,
-            label: (.value.text // .key),
+            label: ((.value.text // $pkey) | gsub("<[^>]*>"; "") | gsub("^\\s+|\\s+$"; "") | gsub("\\s{2,}"; " ") | if . == "" then $pkey else . end),
             value: (.value.value | tostring),
             min:     (if .value.min     != null then (.value.min     | tostring) else null end),
             max:     (if .value.max     != null then (.value.max     | tostring) else null end),
@@ -1002,11 +1008,21 @@ set)
                     ;;
             esac
             ;;
+        audio)
+            case "$VAL" in
+                0|1) ;;
+                *)
+                    echo "Error: audio must be 0 (silent) or 1 (enabled)"
+                    exit 1
+                    ;;
+            esac
+            ;;
         *)
             echo "Usage: wall set <setting> <value>"
             echo ""
             echo "  wall set fps <integer>                   (e.g. 30, 60)"
             echo "  wall set scaling <fill|fit|stretch|default>"
+            echo "  wall set audio <0|1>                     (0=silent, 1=enabled)"
             exit 1
             ;;
     esac

@@ -122,6 +122,7 @@ Changes take effect after the daemon restarts. `wall set` handles that automatic
 |---|---|---|---|
 | `fps` | any integer | `60` | Wallpaper frame rate |
 | `scaling` | `fill` `fit` `stretch` `default` | `fill` | How the wallpaper fills the screen |
+| `audio` | `0` `1` | `0` | Audio output (`0` = silent, `1` = enabled) |
 
 Config file location: `~/.config/wall/config`
 

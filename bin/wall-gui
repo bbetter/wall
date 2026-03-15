@@ -118,6 +118,98 @@ def load_saved_props(wall_id):
     return saved
 
 
+def load_config():
+    """Read ~/.config/wall/config into a dict."""
+    conf = {"fps": "60", "scaling": "fill", "audio": "0"}
+    config_file = os.path.expanduser("~/.config/wall/config")
+    if os.path.exists(config_file):
+        with open(config_file) as f:
+            for line in f:
+                line = line.strip()
+                if "=" in line and not line.startswith("#"):
+                    k, v = line.split("=", 1)
+                    conf[k.lower()] = v
+    return conf
+
+
+########################################
+# SETTINGS WINDOW
+########################################
+
+class SettingsWindow(Gtk.Window):
+
+    def __init__(self, parent):
+        super().__init__(title="Settings", transient_for=parent, modal=True)
+        self.set_default_size(360, 220)
+        self.set_resizable(False)
+
+        conf = load_config()
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
+        box.set_margin_top(20)
+        box.set_margin_bottom(20)
+        box.set_margin_start(24)
+        box.set_margin_end(24)
+        self.set_child(box)
+
+        grid = Gtk.Grid()
+        grid.set_column_spacing(16)
+        grid.set_row_spacing(12)
+        box.append(grid)
+
+        # FPS
+        fps_lbl = Gtk.Label(label="FPS")
+        fps_lbl.set_halign(Gtk.Align.START)
+        grid.attach(fps_lbl, 0, 0, 1, 1)
+
+        self._fps_spin = Gtk.SpinButton()
+        self._fps_spin.set_adjustment(Gtk.Adjustment(
+            value=int(conf.get("fps", 60)),
+            lower=1, upper=240, step_increment=1,
+            page_increment=10, page_size=0
+        ))
+        self._fps_spin.set_numeric(True)
+        grid.attach(self._fps_spin, 1, 0, 1, 1)
+
+        # Scaling
+        scl_lbl = Gtk.Label(label="Scaling")
+        scl_lbl.set_halign(Gtk.Align.START)
+        grid.attach(scl_lbl, 0, 1, 1, 1)
+
+        self._scaling_opts = ["fill", "fit", "stretch", "default"]
+        scl_model = Gtk.StringList.new(self._scaling_opts)
+        self._scl_drop = Gtk.DropDown(model=scl_model)
+        cur_scaling = conf.get("scaling", "fill")
+        if cur_scaling in self._scaling_opts:
+            self._scl_drop.set_selected(self._scaling_opts.index(cur_scaling))
+        grid.attach(self._scl_drop, 1, 1, 1, 1)
+
+        # Audio
+        aud_lbl = Gtk.Label(label="Audio")
+        aud_lbl.set_halign(Gtk.Align.START)
+        grid.attach(aud_lbl, 0, 2, 1, 1)
+
+        self._aud_sw = Gtk.Switch()
+        self._aud_sw.set_active(conf.get("audio", "0") == "1")
+        self._aud_sw.set_halign(Gtk.Align.START)
+        self._aud_sw.set_valign(Gtk.Align.CENTER)
+        grid.attach(self._aud_sw, 1, 2, 1, 1)
+
+        apply_btn = Gtk.Button(label="Apply")
+        apply_btn.add_css_class("suggested-action")
+        apply_btn.connect("clicked", self._on_apply)
+        box.append(apply_btn)
+
+    def _on_apply(self, _btn):
+        fps = str(int(self._fps_spin.get_value()))
+        scaling = self._scaling_opts[self._scl_drop.get_selected()]
+        audio = "1" if self._aud_sw.get_active() else "0"
+        wall_cmd("set", "fps", fps)
+        wall_cmd("set", "scaling", scaling)
+        wall_cmd("set", "audio", audio)
+        self.close()
+
+
 ########################################
 # WINDOW
 ########################################
@@ -145,15 +237,25 @@ class WallGui(Gtk.ApplicationWindow):
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self.set_child(root)
 
-        # search bar
+        # search bar + settings button
+        search_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        search_bar.set_margin_top(8)
+        search_bar.set_margin_bottom(8)
+        search_bar.set_margin_start(8)
+        search_bar.set_margin_end(8)
+
         self.search = Gtk.SearchEntry()
         self.search.set_placeholder_text("Search by title or tags…")
-        self.search.set_margin_top(8)
-        self.search.set_margin_bottom(8)
-        self.search.set_margin_start(8)
-        self.search.set_margin_end(8)
+        self.search.set_hexpand(True)
         self.search.connect("search-changed", lambda _: self.listbox.invalidate_filter())
-        root.append(self.search)
+        search_bar.append(self.search)
+
+        settings_btn = Gtk.Button(label="⚙")
+        settings_btn.set_tooltip_text("Settings")
+        settings_btn.connect("clicked", self._on_settings)
+        search_bar.append(settings_btn)
+
+        root.append(search_bar)
 
         root.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
 
@@ -618,6 +720,10 @@ class WallGui(Gtk.ApplicationWindow):
             wall_cmd("exclude", self.selected_id)
         else:
             wall_cmd("include", self.selected_id)
+
+    def _on_settings(self, _btn):
+        win = SettingsWindow(self)
+        win.present()
 
     # --------------------------------------------------
     # ACTIONS
