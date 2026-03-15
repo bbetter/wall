@@ -231,6 +231,12 @@ class WallGui(Gtk.ApplicationWindow):
         self.id_label.add_css_class("dim-label")
         right.append(self.id_label)
 
+        self._exclude_check = Gtk.CheckButton(label="Exclude from random / cycle / shuffle")
+        self._exclude_check.set_halign(Gtk.Align.START)
+        self._exclude_check.set_sensitive(False)
+        self._exclude_handler = self._exclude_check.connect("toggled", self._on_exclude_toggled)
+        right.append(self._exclude_check)
+
         # properties section (hidden until a wallpaper with properties is selected)
         self._props_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         self._props_box.set_visible(False)
@@ -403,6 +409,12 @@ class WallGui(Gtk.ApplicationWindow):
         self.tags_label.set_text(f"Tags: {tags}" if tags else "")
         self.id_label.set_text(f"ID: {wall['id']}")
 
+        # update exclude checkbox without triggering the toggle handler
+        self._exclude_check.handler_block(self._exclude_handler)
+        self._exclude_check.set_active(info.get("excluded", False))
+        self._exclude_check.set_sensitive(True)
+        self._exclude_check.handler_unblock(self._exclude_handler)
+
         self._update_preview(info.get("thumbnail", ""))
         self._build_properties_panel(info.get("properties", []), wall["id"])
 
@@ -556,6 +568,14 @@ class WallGui(Gtk.ApplicationWindow):
         idx = dropdown.get_selected()
         if 0 <= idx < len(values):
             self._staged_props[key] = values[idx]
+
+    def _on_exclude_toggled(self, btn):
+        if not self.selected_id:
+            return
+        if btn.get_active():
+            wall_cmd("exclude", self.selected_id)
+        else:
+            wall_cmd("include", self.selected_id)
 
     # --------------------------------------------------
     # ACTIONS

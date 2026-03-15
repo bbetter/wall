@@ -26,6 +26,7 @@ LOGFILE="$STATE_DIR/wall.log"
 CYCLE_FILE="$STATE_DIR/cycle"
 CACHE_FILE="$STATE_DIR/list.cache"
 PROPS_DIR="$HOME/.config/wall/props"
+EXCLUDED_FILE="$HOME/.config/wall/excluded"
 
 FPS=60
 SCALING=fill
@@ -238,7 +239,12 @@ load_walls() {
 
 ensure_cache
 
-mapfile -t WALLS < <(while IFS=$'\t' read -r ID _; do echo "$WORKSHOP_DIR/$ID"; done < "$CACHE_FILE")
+mapfile -t WALLS < <(
+    while IFS=$'\t' read -r ID _; do
+        grep -qxF "$ID" "$EXCLUDED_FILE" 2>/dev/null && continue
+        echo "$WORKSHOP_DIR/$ID"
+    done < "$CACHE_FILE"
+)
 
 TOTAL=${#WALLS[@]}
 
@@ -838,7 +844,8 @@ info)
         mkdir -p "$CHECKS_DIR"
         CHECK_FILE="$CHECKS_DIR/$INFO_ID"
         if [ ! -f "$CHECK_FILE" ]; then
-            DUMP_OUT=$(timeout 1 linux-wallpaperengine \
+            DUMP_OUT=$(env -u DISPLAY -u WAYLAND_DISPLAY \
+                timeout 1 linux-wallpaperengine \
                 --assets-dir "$ASSETS" --dump-structure "$INFO_DIR" 2>&1 || true)
             WARN_ITEMS=""
             if echo "$DUMP_OUT" | grep -q "Text objects are not supported"; then
@@ -856,7 +863,8 @@ info)
         --argjson video "$INFO_VIDEO" \
         --argjson props "$INFO_PROPS" \
         --argjson warnings "$INFO_WARNINGS" \
-        '. + {id: $id, thumbnail: $thumb}
+        --argjson excluded "$(grep -qxF "$INFO_ID" "$EXCLUDED_FILE" 2>/dev/null && echo true || echo false)" \
+        '. + {id: $id, thumbnail: $thumb, excluded: $excluded}
           + (if $video != {} then {video: $video} else {} end)
           + (if ($props | length) > 0 then {properties: $props} else {} end)
           + (if ($warnings | length) > 0 then {warnings: $warnings} else {} end)' \
@@ -1044,6 +1052,31 @@ cache)
     esac
 ;;
 
+exclude)
+    EX_ID="${2:-}"
+    if [ -z "$EX_ID" ]; then
+        echo "Usage: wall exclude <id>" >&2; exit 1
+    fi
+    mkdir -p "$(dirname "$EXCLUDED_FILE")"
+    if grep -qxF "$EX_ID" "$EXCLUDED_FILE" 2>/dev/null; then
+        echo "$EX_ID is already excluded"
+    else
+        echo "$EX_ID" >> "$EXCLUDED_FILE"
+        echo "Excluded $EX_ID from random/cycle/shuffle"
+    fi
+;;
+
+include)
+    INC_ID="${2:-}"
+    if [ -z "$INC_ID" ]; then
+        echo "Usage: wall include <id>" >&2; exit 1
+    fi
+    if [ -f "$EXCLUDED_FILE" ]; then
+        sed -i "/^${INC_ID}$/d" "$EXCLUDED_FILE"
+    fi
+    echo "Included $INC_ID in random/cycle/shuffle"
+;;
+
 [0-9]*)
     send_cmd "run" "$1${2:+ $2}"
 ;;
@@ -1067,6 +1100,8 @@ echo "  wall set fps <integer>"
 echo "  wall set scaling <fill|fit|stretch|default>"
 echo "  wall log"
 echo "  wall cache [clear|rebuild]"
+echo "  wall exclude <id>"
+echo "  wall include <id>"
 echo "  wall update [--force]"
 echo "  wall version"
 ;;
