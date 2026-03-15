@@ -805,7 +805,7 @@ update)
     fi
     echo "Updating v$VERSION -> $LATEST_TAG..."
     _REPO_RAW="https://raw.githubusercontent.com/bbetter/wall/$LATEST_TAG"
-    for BIN in wall wall-picker wall-preview; do
+    for BIN in wall wall-picker; do
         curl -sL "$_REPO_RAW/bin/$BIN" -o "$HOME/.local/bin/$BIN"
         chmod +x "$HOME/.local/bin/$BIN"
         echo "  Updated $BIN"

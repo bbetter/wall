@@ -100,7 +100,7 @@ echo "Installing wall tools..."
 
 mkdir -p "$HOME/.local/bin"
 
-for BIN in wall wall-picker wall-preview; do
+for BIN in wall wall-picker; do
   echo "  Downloading $BIN..."
   curl -sL "$REPO_RAW/bin/$BIN" -o "$HOME/.local/bin/$BIN"
   chmod +x "$HOME/.local/bin/$BIN"
