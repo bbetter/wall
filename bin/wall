@@ -8,6 +8,7 @@ VERSION="0.4.0"
 
 CONFIG_FILE="$HOME/.config/wall/config"
 
+# shellcheck source=/dev/null
 [ -f "$CONFIG_FILE" ] && source "$CONFIG_FILE"
 
 STEAM_LIB="${STEAM_LIB:-$HOME/.local/share/Steam/steamapps}"
@@ -587,6 +588,7 @@ while true; do
                 for MON in "${TARGET_MONS[@]}"; do stop_monitor "$MON"; done ;;
             run)
                 # MON_ARG contains "ID" or "ID MONITOR"
+                # shellcheck disable=SC2086
                 run_by_id $MON_ARG ;;
         esac
 
