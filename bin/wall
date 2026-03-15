@@ -211,7 +211,7 @@ for d in "$WORKSHOP_DIR"/*; do
         scene|video)
             local FILE
             FILE=$(jq -r '.file // ""' "$d/project.json")
-            [ -n "$FILE" ] && [ -f "$d/$FILE" ] || continue
+            [ -n "$FILE" ] && { [ -f "$d/$FILE" ] || [ -f "$d/${FILE%.json}.pkg" ]; } || continue
             printf "%s\t%s\t%s\t%s\t%s\n" "$ID" "$TITLE" "$TAGS" "$TYPE" "$DESC"
         ;;
     esac
