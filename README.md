@@ -124,6 +124,22 @@ Config file location: `~/.config/wall/config`
 
 ---
 
+## Releases
+
+`wall update` checks the latest [GitHub release](https://github.com/bbetter/wall/releases) and updates only if a newer version is available. The installer also always installs from the latest release tag rather than `main`.
+
+To publish a new release:
+
+```bash
+# bump VERSION in bin/wall, then:
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+Then create a release on GitHub from that tag. Users will get it on next `wall update`.
+
+---
+
 ## Dependencies
 
 Installed automatically:

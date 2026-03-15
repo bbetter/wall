@@ -4,7 +4,7 @@
 # CONFIG
 ########################################
 
-VERSION="0.1.0"
+VERSION="0.2.0"
 
 CONFIG_FILE="$HOME/.config/wall/config"
 
@@ -768,14 +768,26 @@ version)
 ;;
 
 update)
-    echo "Updating wall..."
-    _REPO_RAW="https://raw.githubusercontent.com/bbetter/wall/main"
+    echo "Checking for updates..."
+    LATEST_TAG=$(curl -s "https://api.github.com/repos/bbetter/wall/releases/latest" \
+        | jq -r '.tag_name // empty')
+    if [ -z "$LATEST_TAG" ]; then
+        echo "Error: could not fetch release info from GitHub"
+        exit 1
+    fi
+    LATEST_VER="${LATEST_TAG#v}"
+    if [ "$LATEST_VER" = "$VERSION" ]; then
+        echo "Already up to date (v$VERSION)"
+        exit 0
+    fi
+    echo "Updating v$VERSION -> $LATEST_TAG..."
+    _REPO_RAW="https://raw.githubusercontent.com/bbetter/wall/$LATEST_TAG"
     for BIN in wall wall-picker wall-preview; do
         curl -sL "$_REPO_RAW/bin/$BIN" -o "$HOME/.local/bin/$BIN"
         chmod +x "$HOME/.local/bin/$BIN"
         echo "  Updated $BIN"
     done
-    echo "Done."
+    echo "Done. Run 'wall version' to confirm."
 ;;
 
 log)

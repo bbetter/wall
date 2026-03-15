@@ -2,7 +2,13 @@
 
 set -e
 
-REPO_RAW="https://raw.githubusercontent.com/bbetter/wall/main"
+REPO="bbetter/wall"
+
+# Resolve the latest release tag; falls back to main if no releases exist yet
+LATEST_TAG=$(curl -s "https://api.github.com/repos/$REPO/releases/latest" \
+  | grep '"tag_name"' | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/')
+
+REPO_RAW="https://raw.githubusercontent.com/$REPO/${LATEST_TAG:-main}"
 
 echo
 echo "wall installer"
