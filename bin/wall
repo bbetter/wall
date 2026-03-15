@@ -781,8 +781,22 @@ info)
             break
         fi
     done
+    INFO_TYPE=$(jq -r '.type // ""' "$INFO_DIR/project.json")
+    INFO_FILE=$(jq -r '.file // ""' "$INFO_DIR/project.json")
+    INFO_VIDEO="{}"
+    if [ "$INFO_TYPE" = "video" ] && [ -n "$INFO_FILE" ] && [ -f "$INFO_DIR/$INFO_FILE" ] && command -v ffprobe >/dev/null; then
+        INFO_VIDEO=$(ffprobe -v quiet -print_format json -show_streams "$INFO_DIR/$INFO_FILE" 2>/dev/null \
+            | jq -c 'first(.streams[] | select(.codec_type == "video")) | {
+                width,
+                height,
+                fps: (.r_frame_rate | split("/") | (.[0] | tonumber) / (.[1] | tonumber)),
+                duration: (.duration | tonumber),
+                codec: .codec_name
+            }' 2>/dev/null || echo "{}")
+    fi
     jq --arg id "$INFO_ID" --arg thumb "$INFO_THUMB" \
-        '. + {id: $id, thumbnail: $thumb}' \
+        --argjson video "$INFO_VIDEO" \
+        '. + {id: $id, thumbnail: $thumb, video: $video}' \
         "$INFO_DIR/project.json"
 ;;
 

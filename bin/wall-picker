@@ -170,6 +170,11 @@ class WallPicker(Gtk.ApplicationWindow):
         self.active_label.add_css_class("accent")
         meta_row.append(self.active_label)
 
+        self.resolution_label = Gtk.Label(label="")
+        self.resolution_label.set_halign(Gtk.Align.START)
+        self.resolution_label.add_css_class("dim-label")
+        right.append(self.resolution_label)
+
         self.desc_label = Gtk.Label(label="")
         self.desc_label.set_halign(Gtk.Align.START)
         self.desc_label.set_wrap(True)
@@ -293,6 +298,23 @@ class WallPicker(Gtk.ApplicationWindow):
         visibility = info.get("visibility", "")
         self.visibility_label.set_text(f"· {visibility}" if visibility else "")
         self.active_label.set_text("· active" if wall["active"] else "")
+
+        video = info.get("video", {})
+        if video and video.get("width"):
+            w, h   = video["width"], video["height"]
+            fps    = int(video.get("fps", 0))
+            dur    = int(video.get("duration", 0))
+            codec  = video.get("codec", "")
+            parts  = [f"{w}×{h}"]
+            if fps:
+                parts.append(f"{fps}fps")
+            if dur:
+                parts.append(f"{dur // 60}:{dur % 60:02d}")
+            if codec:
+                parts.append(codec)
+            self.resolution_label.set_text(" · ".join(parts))
+        else:
+            self.resolution_label.set_text("")
 
         desc = info.get("description", "").strip()
         self.desc_label.set_text(desc)
