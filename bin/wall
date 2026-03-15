@@ -18,6 +18,7 @@ ASSETS="$STEAM_LIB/common/wallpaper_engine/assets"
 
 STATE_DIR="$HOME/.cache/wall"
 MON_DIR="$STATE_DIR/monitors"
+CHECKS_DIR="$STATE_DIR/checks"
 
 PIDFILE="$STATE_DIR/daemon.pid"
 CMD_FILE="$STATE_DIR/cmd"
@@ -831,12 +832,34 @@ info)
             options: (.value.options // null)
         }
     ] | sort_by(.order) | map(del(.order))' "$INFO_DIR/project.json" 2>/dev/null || echo "[]")
+    INFO_TYPE_RAW=$(jq -r '.type // ""' "$INFO_DIR/project.json")
+    INFO_WARNINGS="[]"
+    if [ "$INFO_TYPE_RAW" = "scene" ]; then
+        mkdir -p "$CHECKS_DIR"
+        CHECK_FILE="$CHECKS_DIR/$INFO_ID"
+        if [ ! -f "$CHECK_FILE" ]; then
+            DUMP_OUT=$(timeout 1 linux-wallpaperengine \
+                --assets-dir "$ASSETS" --dump-structure "$INFO_DIR" 2>&1 || true)
+            WARN_ITEMS=""
+            if echo "$DUMP_OUT" | grep -q "Text objects are not supported"; then
+                WARN_ITEMS="\"Text and clock layers will not be rendered\""
+            fi
+            if [ -n "$WARN_ITEMS" ]; then
+                INFO_WARNINGS="[$WARN_ITEMS]"
+            fi
+            echo "$INFO_WARNINGS" > "$CHECK_FILE"
+        else
+            INFO_WARNINGS=$(cat "$CHECK_FILE")
+        fi
+    fi
     jq --arg id "$INFO_ID" --arg thumb "$INFO_THUMB" \
         --argjson video "$INFO_VIDEO" \
         --argjson props "$INFO_PROPS" \
+        --argjson warnings "$INFO_WARNINGS" \
         '. + {id: $id, thumbnail: $thumb}
           + (if $video != {} then {video: $video} else {} end)
-          + (if ($props | length) > 0 then {properties: $props} else {} end)' \
+          + (if ($props | length) > 0 then {properties: $props} else {} end)
+          + (if ($warnings | length) > 0 then {warnings: $warnings} else {} end)' \
         "$INFO_DIR/project.json"
 ;;
 
