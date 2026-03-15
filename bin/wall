@@ -1,0 +1,782 @@
+#!/usr/bin/env bash
+
+########################################
+# CONFIG
+########################################
+
+CONFIG_FILE="$HOME/.config/wall/config"
+
+[ -f "$CONFIG_FILE" ] && source "$CONFIG_FILE"
+
+STEAM_LIB="${STEAM_LIB:-$HOME/.local/share/Steam/steamapps}"
+
+WORKSHOP_DIR="$STEAM_LIB/workshop/content/431960"
+ASSETS="$STEAM_LIB/common/wallpaper_engine/assets"
+
+STATE_DIR="$HOME/.cache/wall"
+MON_DIR="$STATE_DIR/monitors"
+
+PIDFILE="$STATE_DIR/daemon.pid"
+CMD_FILE="$STATE_DIR/cmd"
+LOGFILE="$STATE_DIR/wall.log"
+CYCLE_FILE="$STATE_DIR/cycle"
+CACHE_FILE="$STATE_DIR/list.cache"
+
+FPS=60
+SCALING=fill
+
+mkdir -p "$STATE_DIR" "$MON_DIR"
+
+########################################
+# LOG
+########################################
+
+log() {
+    echo "$(date '+%H:%M:%S') $*" >> "$LOGFILE"
+}
+
+########################################
+# DAEMON CHECK
+########################################
+
+is_running() {
+    [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null
+}
+
+########################################
+# WAIT FOR STEAM
+########################################
+
+wait_for_steam() {
+
+while true; do
+
+    [ -d "$WORKSHOP_DIR" ] && return
+
+    log "Waiting for SteamLibrary mount"
+
+    sleep 2
+
+done
+
+}
+
+########################################
+# MONITOR DETECT
+########################################
+
+get_monitors() {
+
+if command -v hyprctl >/dev/null; then
+    hyprctl monitors -j | jq -r '.[].name'
+    return
+fi
+
+if command -v kscreen-doctor >/dev/null; then
+    kscreen-doctor -o | awk '/Output/ {print $3}'
+    return
+fi
+
+if command -v xrandr >/dev/null; then
+    xrandr | awk '/ connected/{print $1}'
+    return
+fi
+
+echo "*"
+
+}
+
+########################################
+# MONITOR STATE DIR
+########################################
+
+mon_state_dir() {
+    local d="$MON_DIR/$1"
+    mkdir -p "$d"
+    echo "$d"
+}
+
+########################################
+# STOP
+########################################
+
+stop_monitor() {
+
+local MON="$1"
+local D
+D=$(mon_state_dir "$MON")
+
+if [ -f "$D/pid" ]; then
+    local PID
+    PID=$(cat "$D/pid")
+    kill "$PID" 2>/dev/null
+    rm -f "$D/pid"
+    log "Stopped $MON (pid $PID)"
+fi
+
+}
+
+stop_wallpapers() {
+
+log "Stopping all wallpapers"
+
+shopt -s nullglob
+for MON_PATH in "$MON_DIR"/*/; do
+    stop_monitor "$(basename "$MON_PATH")"
+done
+shopt -u nullglob
+
+# Safety net for processes started before per-monitor PID tracking
+pkill -f linux-wallpaperengine 2>/dev/null
+pkill -f mpvpaper 2>/dev/null
+
+}
+
+########################################
+# LAUNCH ON MONITOR
+########################################
+
+launch_on_monitor() {
+
+local DIR="$1"
+local MON="$2"
+local D
+D=$(mon_state_dir "$MON")
+
+local TITLE
+TITLE=$(jq -r '.title' "$DIR/project.json")
+
+log "Launching: $TITLE on $MON"
+
+stop_monitor "$MON"
+
+linux-wallpaperengine \
+    "$DIR" \
+    --assets-dir "$ASSETS" \
+    --screen-root "$MON" \
+    --scaling "$SCALING" \
+    --fps "$FPS" \
+    --disable-audio &
+
+local LAUNCHED_PID=$!
+echo "$LAUNCHED_PID" > "$D/pid"
+echo "$(basename "$DIR")" > "$D/current"
+
+}
+
+########################################
+# METADATA CACHE
+########################################
+
+cache_valid() {
+
+[ -f "$CACHE_FILE" ] || return 1
+
+[ -z "$(find "$WORKSHOP_DIR" -name "project.json" -newer "$CACHE_FILE" -print -quit 2>/dev/null)" ]
+
+}
+
+build_list_cache() {
+
+log "Building list cache"
+
+local tmp="$CACHE_FILE.tmp"
+
+for d in "$WORKSHOP_DIR"/*; do
+
+    [ -f "$d/project.json" ] || continue
+
+    local ID
+    ID=$(basename "$d")
+
+    local TITLE TYPE TAGS
+    IFS=$'\t' read -r TITLE TYPE TAGS <<< "$(jq -r '"\(.title)\t\((.type // "") | ascii_downcase)\t\([.tags[]? | tostring] | join(", "))"' "$d/project.json")"
+
+    case "$TYPE" in
+        scene|video)
+            local FILE
+            FILE=$(jq -r '.file // ""' "$d/project.json")
+            [ -n "$FILE" ] && [ -f "$d/$FILE" ] || continue
+            printf "%s\t%s\t%s\n" "$ID" "$TITLE" "$TAGS"
+        ;;
+    esac
+
+done | sort > "$tmp" && mv "$tmp" "$CACHE_FILE"
+
+log "List cache built ($(wc -l < "$CACHE_FILE") entries)"
+
+}
+
+ensure_cache() {
+
+cache_valid || build_list_cache
+
+}
+
+########################################
+# LOAD WALL LIST
+########################################
+
+load_walls() {
+
+ensure_cache
+
+mapfile -t WALLS < <(while IFS=$'\t' read -r ID _; do echo "$WORKSHOP_DIR/$ID"; done < "$CACHE_FILE")
+
+TOTAL=${#WALLS[@]}
+
+log "Loaded wallpapers: $TOTAL"
+
+}
+
+########################################
+# VALIDATE INDEX
+########################################
+
+validate_index_for() {
+
+local MON="$1"
+local D
+D=$(mon_state_dir "$MON")
+
+local IDX
+IDX=$(cat "$D/index" 2>/dev/null || echo 0)
+
+local CURRENT_ID
+CURRENT_ID=$(cat "$D/current" 2>/dev/null)
+
+if [ -n "$CURRENT_ID" ] && [ "$(basename "${WALLS[$IDX]:-}")" != "$CURRENT_ID" ]; then
+
+    log "Stale index $IDX for $MON (expected $CURRENT_ID), searching"
+
+    local i
+    for i in "${!WALLS[@]}"; do
+        if [ "$(basename "${WALLS[$i]}")" = "$CURRENT_ID" ]; then
+            IDX=$i
+            echo "$IDX" > "$D/index"
+            log "Corrected index to $IDX for $MON"
+            break
+        fi
+    done
+
+fi
+
+echo "$IDX"
+
+}
+
+########################################
+# SCHEDULE NEXT TICK
+########################################
+
+schedule_next_tick() {
+
+local MON="$1"
+local D
+D=$(mon_state_dir "$MON")
+
+local MODE
+MODE=$(cat "$D/mode" 2>/dev/null)
+
+if [ "$MODE" = "cycle" ] || [ "$MODE" = "shuffle" ]; then
+    local INTERVAL
+    INTERVAL=$(cat "$CYCLE_FILE" 2>/dev/null || echo 300)
+    echo $(( $(date +%s) + INTERVAL )) > "$D/next_tick"
+fi
+
+}
+
+########################################
+# SHUFFLE
+########################################
+
+build_shuffle_for() {
+
+local MON="$1"
+local D
+D=$(mon_state_dir "$MON")
+
+shuf -i "0-$(( TOTAL - 1 ))" > "$D/shuffle"
+
+log "Shuffle list built for $MON ($TOTAL entries)"
+
+}
+
+########################################
+# NEXT
+########################################
+
+next_wallpaper_for() {
+
+local MON="$1"
+local D
+D=$(mon_state_dir "$MON")
+
+log "next_wallpaper_for: $MON"
+
+load_walls
+
+local MODE
+MODE=$(cat "$D/mode" 2>/dev/null || echo idle)
+
+if [ "$MODE" = "shuffle" ]; then
+
+    local -a SHUFFLE_IDX
+    mapfile -t SHUFFLE_IDX < "$D/shuffle" 2>/dev/null
+
+    local POS
+    POS=$(cat "$D/index" 2>/dev/null || echo -1)
+    POS=$(( POS + 1 ))
+
+    if [ "$POS" -ge "${#SHUFFLE_IDX[@]}" ]; then
+        build_shuffle_for "$MON"
+        mapfile -t SHUFFLE_IDX < "$D/shuffle"
+        POS=0
+    fi
+
+    echo "$POS" > "$D/index"
+    log "Shuffle pos: $POS -> wall index: ${SHUFFLE_IDX[$POS]} on $MON"
+    launch_on_monitor "${WALLS[${SHUFFLE_IDX[$POS]}]}" "$MON"
+
+else
+
+    local IDX
+    IDX=$(validate_index_for "$MON")
+    log "Current index for $MON: $IDX"
+    IDX=$(( (IDX + 1) % TOTAL ))
+    log "Next index for $MON: $IDX"
+    echo "$IDX" > "$D/index"
+    launch_on_monitor "${WALLS[$IDX]}" "$MON"
+
+fi
+
+schedule_next_tick "$MON"
+
+}
+
+########################################
+# PREV
+########################################
+
+prev_wallpaper_for() {
+
+local MON="$1"
+local D
+D=$(mon_state_dir "$MON")
+
+log "prev_wallpaper_for: $MON"
+
+load_walls
+
+local MODE
+MODE=$(cat "$D/mode" 2>/dev/null || echo idle)
+
+if [ "$MODE" = "shuffle" ]; then
+
+    local -a SHUFFLE_IDX
+    mapfile -t SHUFFLE_IDX < "$D/shuffle" 2>/dev/null
+
+    local POS
+    POS=$(cat "$D/index" 2>/dev/null || echo 0)
+    POS=$(( POS - 1 ))
+    [ "$POS" -lt 0 ] && POS=$(( ${#SHUFFLE_IDX[@]} - 1 ))
+
+    echo "$POS" > "$D/index"
+    log "Shuffle pos: $POS -> wall index: ${SHUFFLE_IDX[$POS]} on $MON"
+    launch_on_monitor "${WALLS[${SHUFFLE_IDX[$POS]}]}" "$MON"
+
+else
+
+    local IDX
+    IDX=$(validate_index_for "$MON")
+    log "Current index for $MON: $IDX"
+    IDX=$(( (IDX - 1 + TOTAL) % TOTAL ))
+    log "Prev index for $MON: $IDX"
+    echo "$IDX" > "$D/index"
+    launch_on_monitor "${WALLS[$IDX]}" "$MON"
+
+fi
+
+schedule_next_tick "$MON"
+
+}
+
+########################################
+# RANDOM
+########################################
+
+random_wallpaper_for() {
+
+local MON="$1"
+local D
+D=$(mon_state_dir "$MON")
+
+log "random_wallpaper_for: $MON"
+
+echo "idle" > "$D/mode"
+rm -f "$D/next_tick"
+
+load_walls
+
+local IDX
+IDX=$(( RANDOM % TOTAL ))
+
+log "Random index for $MON: $IDX"
+
+echo "$IDX" > "$D/index"
+launch_on_monitor "${WALLS[$IDX]}" "$MON"
+
+}
+
+########################################
+# START CYCLE
+########################################
+
+start_cycle_for() {
+
+local MON="$1"
+local D
+D=$(mon_state_dir "$MON")
+
+local INTERVAL
+INTERVAL=$(cat "$CYCLE_FILE" 2>/dev/null || echo 300)
+
+log "start_cycle_for $MON interval=$INTERVAL"
+
+echo "cycle" > "$D/mode"
+
+next_wallpaper_for "$MON"
+
+}
+
+########################################
+# START SHUFFLE
+########################################
+
+start_shuffle_for() {
+
+local MON="$1"
+local D
+D=$(mon_state_dir "$MON")
+
+local INTERVAL
+INTERVAL=$(cat "$CYCLE_FILE" 2>/dev/null || echo 300)
+
+log "start_shuffle_for $MON interval=$INTERVAL"
+
+echo "shuffle" > "$D/mode"
+
+load_walls
+build_shuffle_for "$MON"
+
+echo "-1" > "$D/index"
+
+next_wallpaper_for "$MON"
+
+}
+
+########################################
+# RUN BY ID
+########################################
+
+run_by_id() {
+
+local ID="$1"
+local MON_ARG="$2"
+
+log "run_by_id: $ID MON=${MON_ARG:-all}"
+
+load_walls
+
+local TARGET="$WORKSHOP_DIR/$ID"
+
+local FOUND_IDX=""
+local i
+for i in "${!WALLS[@]}"; do
+    if [ "${WALLS[$i]}" = "$TARGET" ]; then
+        FOUND_IDX=$i
+        break
+    fi
+done
+
+local -a TARGET_MONS
+if [ -n "$MON_ARG" ]; then
+    TARGET_MONS=("$MON_ARG")
+else
+    mapfile -t TARGET_MONS < <(get_monitors)
+fi
+
+local MON D
+for MON in "${TARGET_MONS[@]}"; do
+    D=$(mon_state_dir "$MON")
+    [ -n "$FOUND_IDX" ] && echo "$FOUND_IDX" > "$D/index"
+    echo "idle" > "$D/mode"
+    rm -f "$D/next_tick"
+    launch_on_monitor "$TARGET" "$MON"
+done
+
+}
+
+########################################
+# DAEMON LOOP
+########################################
+
+daemon_loop() {
+
+echo $$ > "$PIDFILE"
+
+trap 'stop_wallpapers; rm -f "$PIDFILE"; exit' TERM INT
+
+if [ -f "$LOGFILE" ]; then
+    tail -n 1000 "$LOGFILE" > "$LOGFILE.tmp" && mv "$LOGFILE.tmp" "$LOGFILE"
+fi
+
+log "Daemon started"
+
+wait_for_steam
+
+while true; do
+
+    ################################
+    # COMMAND HANDLING
+    ################################
+
+    if [ -f "$CMD_FILE" ]; then
+
+        local CMD MON_ARG
+        read -r CMD MON_ARG < "$CMD_FILE"
+        rm "$CMD_FILE"
+
+        log "Command received: $CMD${MON_ARG:+ $MON_ARG}"
+
+        local -a TARGET_MONS
+        if [ -n "$MON_ARG" ]; then
+            TARGET_MONS=("$MON_ARG")
+        else
+            mapfile -t TARGET_MONS < <(get_monitors)
+        fi
+
+        local MON
+        case "$CMD" in
+            random)
+                for MON in "${TARGET_MONS[@]}"; do random_wallpaper_for "$MON"; done ;;
+            next)
+                for MON in "${TARGET_MONS[@]}"; do next_wallpaper_for "$MON"; done ;;
+            prev)
+                for MON in "${TARGET_MONS[@]}"; do prev_wallpaper_for "$MON"; done ;;
+            cycle)
+                for MON in "${TARGET_MONS[@]}"; do start_cycle_for "$MON"; done ;;
+            shuffle)
+                for MON in "${TARGET_MONS[@]}"; do start_shuffle_for "$MON"; done ;;
+            stop)
+                for MON in "${TARGET_MONS[@]}"; do stop_monitor "$MON"; done ;;
+            run)
+                # MON_ARG contains "ID" or "ID MONITOR"
+                run_by_id $MON_ARG ;;
+        esac
+
+    fi
+
+    ################################
+    # TICK CHECK
+    ################################
+
+    local NOW
+    NOW=$(date +%s)
+
+    shopt -s nullglob
+    local MON_PATH
+    for MON_PATH in "$MON_DIR"/*/; do
+        local MON_NAME
+        MON_NAME=$(basename "$MON_PATH")
+
+        local MODE
+        MODE=$(cat "${MON_PATH}mode" 2>/dev/null)
+        [ "$MODE" = "cycle" ] || [ "$MODE" = "shuffle" ] || continue
+
+        local TICK
+        TICK=$(cat "${MON_PATH}next_tick" 2>/dev/null)
+        [ -z "$TICK" ] && continue
+
+        if [ "$NOW" -ge "$TICK" ]; then
+            log "Tick expired for $MON_NAME"
+            next_wallpaper_for "$MON_NAME"
+        fi
+    done
+    shopt -u nullglob
+
+    sleep 0.5
+
+done
+
+}
+
+########################################
+# SEND COMMAND
+########################################
+
+send_cmd() {
+
+local CMD="$1"
+local MON="${2:-}"
+
+log "send_cmd: $CMD${MON:+ $MON}"
+
+if ! is_running; then
+    log "Daemon not running, starting"
+    "$0" start
+    sleep 1
+fi
+
+printf "%s\n" "$CMD${MON:+ $MON}" > "$CMD_FILE"
+
+}
+
+########################################
+# ENTRY
+########################################
+
+case "$1" in
+
+daemon)
+    daemon_loop
+;;
+
+start)
+
+if is_running; then
+    exit 0
+fi
+
+log "Starting daemon"
+
+nohup "$0" daemon >/dev/null 2>&1 &
+;;
+
+random)
+    send_cmd random "${2:-}"
+;;
+
+next)
+    send_cmd next "${2:-}"
+;;
+
+prev)
+    send_cmd prev "${2:-}"
+;;
+
+cycle)
+    echo "${2:-300}" > "$CYCLE_FILE"
+    log "cycle command interval=${2:-300}"
+    send_cmd cycle "${3:-}"
+;;
+
+shuffle)
+    echo "${2:-300}" > "$CYCLE_FILE"
+    log "shuffle command interval=${2:-300}"
+    send_cmd shuffle "${3:-}"
+;;
+
+stop)
+    if [ -n "${2:-}" ]; then
+        stop_monitor "$2"
+    else
+        stop_wallpapers
+        if is_running; then
+            kill "$(cat "$PIDFILE")" 2>/dev/null
+            rm -f "$PIDFILE"
+            log "Daemon stopped"
+        fi
+    fi
+;;
+
+list)
+
+wait_for_steam
+
+ensure_cache
+
+declare -A CURRENT_IDS
+shopt -s nullglob
+for MON_PATH in "$MON_DIR"/*/; do
+    if [ -f "${MON_PATH}current" ]; then
+        CURRENT_IDS["$(cat "${MON_PATH}current")"]=1
+    fi
+done
+shopt -u nullglob
+
+while IFS=$'\t' read -r ID TITLE TAGS; do
+    MARKER=" "
+    [ "${CURRENT_IDS[$ID]+_}" ] && MARKER="*"
+    printf "%s\t%s\t%s\t%s\n" "$MARKER" "$ID" "$TITLE" "$TAGS"
+done < "$CACHE_FILE"
+;;
+
+status)
+
+load_walls
+
+is_running \
+    && echo "daemon:  running (pid $(cat "$PIDFILE"))" \
+    || echo "daemon:  stopped"
+echo
+
+local -A ACTIVE_MONS
+while IFS= read -r m; do ACTIVE_MONS["$m"]=1; done < <(get_monitors)
+
+shopt -s nullglob
+for MON_PATH in "$MON_DIR"/*/; do
+    MON_NAME=$(basename "$MON_PATH")
+
+    [ "${ACTIVE_MONS[$MON_NAME]+_}" ] || continue
+
+    MODE=$(cat "${MON_PATH}mode"      2>/dev/null || echo "idle")
+    IDX=$(cat  "${MON_PATH}index"     2>/dev/null || echo "?")
+    CUR=$(cat  "${MON_PATH}current"   2>/dev/null)
+    TICK=$(cat "${MON_PATH}next_tick" 2>/dev/null)
+
+    echo "monitor: $MON_NAME"
+
+    if [ "$MODE" = "cycle" ] || [ "$MODE" = "shuffle" ]; then
+        INTERVAL=$(cat "$CYCLE_FILE" 2>/dev/null || echo 300)
+        echo "  mode:    $MODE (${INTERVAL}s)"
+        if [ -n "$TICK" ]; then
+            echo "  next in: $(( TICK - $(date +%s) ))s"
+        fi
+    else
+        echo "  mode:    $MODE"
+    fi
+
+    if [ "$IDX" != "?" ] && [ -n "${WALLS[$IDX]:-}" ]; then
+        echo "  current: $(jq -r '.title' "${WALLS[$IDX]}/project.json")"
+        echo "  id:      $CUR"
+        echo "  index:   $IDX / $(( TOTAL - 1 ))"
+    fi
+
+    echo
+done
+shopt -u nullglob
+;;
+
+monitors)
+    get_monitors
+;;
+
+[0-9]*)
+    send_cmd "run" "$1${2:+ $2}"
+;;
+
+*)
+echo "Usage:"
+echo "  wall random [monitor]"
+echo "  wall cycle [seconds] [monitor]"
+echo "  wall shuffle [seconds] [monitor]"
+echo "  wall next [monitor]"
+echo "  wall prev [monitor]"
+echo "  wall status"
+echo "  wall <id> [monitor]"
+echo "  wall list"
+echo "  wall stop [monitor]"
+;;
+
+esac

@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+
+WALL="$HOME/.local/bin/wall"
+
+truncate_title() {
+
+TITLE="$1"
+MAX=40
+
+if [ ${#TITLE} -gt $MAX ]; then
+    echo "${TITLE:0:$MAX}…"
+else
+    echo "$TITLE"
+fi
+
+}
+
+build_list() {
+
+"$WALL" list | while IFS=$'\t' read -r MARKER ID TITLE TAGS; do
+
+    TITLE=$(truncate_title "$TITLE")
+
+    printf "%s %-40s %s\t%s\n" \
+        "$MARKER" \
+        "$TITLE" \
+        "$TAGS" \
+        "$ID"
+
+done
+
+}
+
+ID=$(build_list | fuzzel \
+    --dmenu \
+    --width 120 \
+    --lines 20 \
+    --with-nth=1 \
+    --accept-nth=2)
+
+[ -z "$ID" ] && exit
+
+mapfile -t MONS < <("$WALL" monitors)
+
+if [ "${#MONS[@]}" -le 1 ]; then
+
+    "$WALL" "$ID"
+
+else
+
+    MON=$(printf "%s\n" "${MONS[@]}" ALL | fuzzel \
+        --dmenu \
+        --width 40 \
+        --lines $(( ${#MONS[@]} + 1 )))
+
+    [ -z "$MON" ] && exit
+
+    if [ "$MON" = "ALL" ]; then
+        "$WALL" "$ID"
+    else
+        "$WALL" "$ID" "$MON"
+    fi
+
+fi
+
