@@ -4,7 +4,7 @@
 # CONFIG
 ########################################
 
-VERSION="0.7.0"
+VERSION="0.8.0"
 
 CONFIG_FILE="$HOME/.config/wall/config"
 
@@ -27,6 +27,7 @@ CYCLE_FILE="$STATE_DIR/cycle"
 CACHE_FILE="$STATE_DIR/list.cache"
 PROPS_DIR="$HOME/.config/wall/props"
 EXCLUDED_FILE="$HOME/.config/wall/excluded"
+PLAYLISTS_DIR="$HOME/.config/wall/playlists"
 
 FPS=60
 SCALING=fill
@@ -257,6 +258,44 @@ log "Loaded wallpapers: $TOTAL"
 }
 
 ########################################
+# LOAD PLAYLIST WALLS
+########################################
+
+load_playlist_walls() {
+
+local NAME="$1"
+local PFILE="$PLAYLISTS_DIR/$NAME"
+
+if [ ! -f "$PFILE" ]; then
+    log "Playlist '$NAME' not found: $PFILE"
+    WALLS=()
+    TOTAL=0
+    return 1
+fi
+
+ensure_cache
+
+local -A CACHE_IDS
+while IFS=$'\t' read -r ID _; do
+    CACHE_IDS["$ID"]=1
+done < "$CACHE_FILE"
+
+WALLS=()
+while IFS= read -r ID; do
+    [ -z "$ID" ] && continue
+    if [ -z "${CACHE_IDS[$ID]+_}" ]; then
+        log "Playlist '$NAME': skipping unknown ID $ID"
+        continue
+    fi
+    WALLS+=("$WORKSHOP_DIR/$ID")
+done < "$PFILE"
+
+TOTAL=${#WALLS[@]}
+log "Playlist '$NAME' loaded: $TOTAL walls"
+
+}
+
+########################################
 # VALIDATE INDEX
 ########################################
 
@@ -305,7 +344,8 @@ D=$(mon_state_dir "$MON")
 local MODE
 MODE=$(cat "$D/mode" 2>/dev/null)
 
-if [ "$MODE" = "cycle" ] || [ "$MODE" = "shuffle" ]; then
+if [ "$MODE" = "cycle" ] || [ "$MODE" = "shuffle" ] \
+   || [ "$MODE" = "playlist" ] || [ "$MODE" = "playlist_shuffle" ]; then
     local INTERVAL
     INTERVAL=$(cat "$CYCLE_FILE" 2>/dev/null || echo 300)
     echo $(( $(date +%s) + INTERVAL )) > "$D/next_tick"
@@ -341,12 +381,22 @@ D=$(mon_state_dir "$MON")
 
 log "next_wallpaper_for: $MON"
 
-load_walls
-
 local MODE
 MODE=$(cat "$D/mode" 2>/dev/null || echo idle)
 
-if [ "$MODE" = "shuffle" ]; then
+if [ "$MODE" = "playlist" ] || [ "$MODE" = "playlist_shuffle" ]; then
+    local PL_NAME
+    PL_NAME=$(cat "$D/playlist" 2>/dev/null)
+    load_playlist_walls "$PL_NAME" || return 1
+    if [ "$TOTAL" -eq 0 ]; then
+        log "next_wallpaper_for $MON: playlist empty, stopping"
+        return 1
+    fi
+else
+    load_walls
+fi
+
+if [ "$MODE" = "shuffle" ] || [ "$MODE" = "playlist_shuffle" ]; then
 
     local -a SHUFFLE_IDX
     mapfile -t SHUFFLE_IDX < "$D/shuffle" 2>/dev/null
@@ -393,12 +443,22 @@ D=$(mon_state_dir "$MON")
 
 log "prev_wallpaper_for: $MON"
 
-load_walls
-
 local MODE
 MODE=$(cat "$D/mode" 2>/dev/null || echo idle)
 
-if [ "$MODE" = "shuffle" ]; then
+if [ "$MODE" = "playlist" ] || [ "$MODE" = "playlist_shuffle" ]; then
+    local PL_NAME
+    PL_NAME=$(cat "$D/playlist" 2>/dev/null)
+    load_playlist_walls "$PL_NAME" || return 1
+    if [ "$TOTAL" -eq 0 ]; then
+        log "prev_wallpaper_for $MON: playlist empty, stopping"
+        return 1
+    fi
+else
+    load_walls
+fi
+
+if [ "$MODE" = "shuffle" ] || [ "$MODE" = "playlist_shuffle" ]; then
 
     local -a SHUFFLE_IDX
     mapfile -t SHUFFLE_IDX < "$D/shuffle" 2>/dev/null
@@ -503,6 +563,76 @@ next_wallpaper_for "$MON"
 }
 
 ########################################
+# START PLAYLIST
+########################################
+
+start_playlist_for() {
+
+local MON="$1"
+local D
+D=$(mon_state_dir "$MON")
+
+local NAME
+NAME=$(cat "$D/playlist" 2>/dev/null)
+
+if [ -z "$NAME" ]; then
+    log "start_playlist_for $MON: no playlist name in state"
+    return 1
+fi
+
+log "start_playlist_for $MON name=$NAME"
+
+echo "playlist" > "$D/mode"
+echo "-1"       > "$D/index"
+
+load_playlist_walls "$NAME" || { echo "idle" > "$D/mode"; return 1; }
+
+if [ "$TOTAL" -eq 0 ]; then
+    log "start_playlist_for $MON: playlist '$NAME' is empty"
+    echo "idle" > "$D/mode"
+    return 1
+fi
+
+next_wallpaper_for "$MON"
+
+}
+
+########################################
+# START PLAYLIST SHUFFLE
+########################################
+
+start_playlist_shuffle_for() {
+
+local MON="$1"
+local D
+D=$(mon_state_dir "$MON")
+
+local NAME
+NAME=$(cat "$D/playlist" 2>/dev/null)
+
+if [ -z "$NAME" ]; then
+    log "start_playlist_shuffle_for $MON: no playlist name in state"
+    return 1
+fi
+
+log "start_playlist_shuffle_for $MON name=$NAME"
+
+load_playlist_walls "$NAME" || return 1
+
+if [ "$TOTAL" -eq 0 ]; then
+    log "start_playlist_shuffle_for $MON: playlist '$NAME' is empty"
+    return 1
+fi
+
+echo "playlist_shuffle" > "$D/mode"
+echo "-1"               > "$D/index"
+build_shuffle_for "$MON"
+
+next_wallpaper_for "$MON"
+
+}
+
+########################################
 # RUN BY ID
 ########################################
 
@@ -601,6 +731,42 @@ while true; do
                 # MON_ARG contains "ID" or "ID MONITOR"
                 # shellcheck disable=SC2086
                 run_by_id $MON_ARG ;;
+            playlist_play)
+                # MON_ARG = "PLAYLIST_NAME" or "PLAYLIST_NAME MONITOR"
+                local PL_NAME PL_MON
+                PL_NAME="${MON_ARG%% *}"
+                PL_MON="${MON_ARG#* }"
+                [ "$PL_MON" = "$PL_NAME" ] && PL_MON=""
+                local -a PL_TARGET_MONS
+                if [ -n "$PL_MON" ]; then
+                    PL_TARGET_MONS=("$PL_MON")
+                else
+                    mapfile -t PL_TARGET_MONS < <(get_monitors)
+                fi
+                for MON in "${PL_TARGET_MONS[@]}"; do
+                    local _D
+                    _D=$(mon_state_dir "$MON")
+                    echo "$PL_NAME" > "$_D/playlist"
+                    start_playlist_for "$MON"
+                done ;;
+            playlist_shuffle)
+                # MON_ARG = "PLAYLIST_NAME" or "PLAYLIST_NAME MONITOR"
+                local PL_NAME PL_MON
+                PL_NAME="${MON_ARG%% *}"
+                PL_MON="${MON_ARG#* }"
+                [ "$PL_MON" = "$PL_NAME" ] && PL_MON=""
+                local -a PL_TARGET_MONS
+                if [ -n "$PL_MON" ]; then
+                    PL_TARGET_MONS=("$PL_MON")
+                else
+                    mapfile -t PL_TARGET_MONS < <(get_monitors)
+                fi
+                for MON in "${PL_TARGET_MONS[@]}"; do
+                    local _D
+                    _D=$(mon_state_dir "$MON")
+                    echo "$PL_NAME" > "$_D/playlist"
+                    start_playlist_shuffle_for "$MON"
+                done ;;
         esac
 
     fi
@@ -620,7 +786,8 @@ while true; do
 
         local MODE
         MODE=$(cat "${MON_PATH}mode" 2>/dev/null)
-        [ "$MODE" = "cycle" ] || [ "$MODE" = "shuffle" ] || continue
+        [ "$MODE" = "cycle" ] || [ "$MODE" = "shuffle" ] \
+            || [ "$MODE" = "playlist" ] || [ "$MODE" = "playlist_shuffle" ] || continue
 
         local TICK
         TICK=$(cat "${MON_PATH}next_tick" 2>/dev/null)
@@ -658,6 +825,14 @@ fi
 
 printf "%s\n" "$CMD${MON:+ $MON}" > "$CMD_FILE"
 
+}
+
+send_playlist_play_cmd() {
+    send_cmd "playlist_play" "$1${2:+ $2}"
+}
+
+send_playlist_shuffle_cmd() {
+    send_cmd "playlist_shuffle" "$1${2:+ $2}"
 }
 
 ########################################
@@ -765,9 +940,15 @@ for MON_PATH in "$MON_DIR"/*/; do
 
     echo "monitor: $MON_NAME"
 
-    if [ "$MODE" = "cycle" ] || [ "$MODE" = "shuffle" ]; then
+    if [ "$MODE" = "cycle" ] || [ "$MODE" = "shuffle" ] \
+       || [ "$MODE" = "playlist" ] || [ "$MODE" = "playlist_shuffle" ]; then
         INTERVAL=$(cat "$CYCLE_FILE" 2>/dev/null || echo 300)
-        echo "  mode:    $MODE (${INTERVAL}s)"
+        PL_SUFFIX=""
+        if [ "$MODE" = "playlist" ] || [ "$MODE" = "playlist_shuffle" ]; then
+            PL_NAME=$(cat "${MON_PATH}playlist" 2>/dev/null)
+            PL_SUFFIX=" [playlist: $PL_NAME]"
+        fi
+        echo "  mode:    $MODE${PL_SUFFIX} (${INTERVAL}s)"
         if [ -n "$TICK" ]; then
             REMAINING=$(( TICK - $(date +%s) ))
             if [ "$REMAINING" -ge 60 ]; then
@@ -1093,6 +1274,129 @@ include)
     echo "Included $INC_ID in random/cycle/shuffle"
 ;;
 
+playlist)
+    case "${2:-}" in
+
+        create)
+            NAME="${3:-}"
+            [ -z "$NAME" ] && { echo "Usage: wall playlist create <name>" >&2; exit 1; }
+            mkdir -p "$PLAYLISTS_DIR"
+            PFILE="$PLAYLISTS_DIR/$NAME"
+            if [ -f "$PFILE" ]; then
+                echo "Playlist '$NAME' already exists"
+            else
+                touch "$PFILE"
+                echo "Created playlist '$NAME'"
+            fi
+            ;;
+
+        add)
+            NAME="${3:-}"
+            [ -z "$NAME" ] && { echo "Usage: wall playlist add <name> <id> [id ...]" >&2; exit 1; }
+            PFILE="$PLAYLISTS_DIR/$NAME"
+            [ -f "$PFILE" ] || { echo "Playlist '$NAME' not found" >&2; exit 1; }
+            shift 3
+            for ID in "$@"; do
+                if grep -qxF "$ID" "$PFILE" 2>/dev/null; then
+                    echo "$ID already in playlist '$NAME'"
+                else
+                    echo "$ID" >> "$PFILE"
+                    echo "Added $ID to '$NAME'"
+                fi
+            done
+            ;;
+
+        remove)
+            NAME="${3:-}"
+            [ -z "$NAME" ] && { echo "Usage: wall playlist remove <name> <id> [id ...]" >&2; exit 1; }
+            PFILE="$PLAYLISTS_DIR/$NAME"
+            [ -f "$PFILE" ] || { echo "Playlist '$NAME' not found" >&2; exit 1; }
+            shift 3
+            for ID in "$@"; do
+                if grep -qxF "$ID" "$PFILE" 2>/dev/null; then
+                    sed -i "/^${ID}$/d" "$PFILE"
+                    echo "Removed $ID from '$NAME'"
+                else
+                    echo "$ID not in playlist '$NAME'"
+                fi
+            done
+            ;;
+
+        delete)
+            NAME="${3:-}"
+            [ -z "$NAME" ] && { echo "Usage: wall playlist delete <name>" >&2; exit 1; }
+            PFILE="$PLAYLISTS_DIR/$NAME"
+            [ -f "$PFILE" ] || { echo "Playlist '$NAME' not found" >&2; exit 1; }
+            rm "$PFILE"
+            echo "Deleted playlist '$NAME'"
+            ;;
+
+        list)
+            mkdir -p "$PLAYLISTS_DIR"
+            FOUND=0
+            shopt -s nullglob
+            for PFILE in "$PLAYLISTS_DIR"/*; do
+                NAME=$(basename "$PFILE")
+                COUNT=$(wc -l < "$PFILE")
+                echo "$NAME  ($COUNT entries)"
+                FOUND=1
+            done
+            shopt -u nullglob
+            [ "$FOUND" -eq 0 ] && echo "No playlists found"
+            ;;
+
+        show)
+            NAME="${3:-}"
+            [ -z "$NAME" ] && { echo "Usage: wall playlist show <name>" >&2; exit 1; }
+            PFILE="$PLAYLISTS_DIR/$NAME"
+            [ -f "$PFILE" ] || { echo "Playlist '$NAME' not found" >&2; exit 1; }
+            ensure_cache
+            while IFS= read -r ID; do
+                [ -z "$ID" ] && continue
+                PTITLE=$(grep -m1 "^${ID}	" "$CACHE_FILE" | cut -f2)
+                if [ -n "$PTITLE" ]; then
+                    echo "$ID  $PTITLE"
+                else
+                    echo "$ID  [not found in workshop]"
+                fi
+            done < "$PFILE"
+            ;;
+
+        play)
+            NAME="${3:-}"
+            [ -z "$NAME" ] && { echo "Usage: wall playlist play <name> [seconds] [monitor]" >&2; exit 1; }
+            PFILE="$PLAYLISTS_DIR/$NAME"
+            [ -f "$PFILE" ] || { echo "Playlist '$NAME' not found" >&2; exit 1; }
+            echo "${4:-300}" > "$CYCLE_FILE"
+            log "playlist play $NAME interval=${4:-300}"
+            send_playlist_play_cmd "$NAME" "${5:-}"
+            ;;
+
+        shuffle)
+            NAME="${3:-}"
+            [ -z "$NAME" ] && { echo "Usage: wall playlist shuffle <name> [seconds] [monitor]" >&2; exit 1; }
+            PFILE="$PLAYLISTS_DIR/$NAME"
+            [ -f "$PFILE" ] || { echo "Playlist '$NAME' not found" >&2; exit 1; }
+            echo "${4:-300}" > "$CYCLE_FILE"
+            log "playlist shuffle $NAME interval=${4:-300}"
+            send_playlist_shuffle_cmd "$NAME" "${5:-}"
+            ;;
+
+        *)
+            echo "Usage: wall playlist <command>"
+            echo ""
+            echo "  wall playlist create <name>"
+            echo "  wall playlist add <name> <id> [id ...]"
+            echo "  wall playlist remove <name> <id> [id ...]"
+            echo "  wall playlist delete <name>"
+            echo "  wall playlist list"
+            echo "  wall playlist show <name>"
+            echo "  wall playlist play <name> [seconds] [monitor]"
+            echo "  wall playlist shuffle <name> [seconds] [monitor]"
+            ;;
+    esac
+;;
+
 [0-9]*)
     send_cmd "run" "$1${2:+ $2}"
 ;;
@@ -1118,6 +1422,9 @@ echo "  wall log"
 echo "  wall cache [clear|rebuild]"
 echo "  wall exclude <id>"
 echo "  wall include <id>"
+echo "  wall playlist create/add/remove/delete/list/show <name>"
+echo "  wall playlist play <name> [seconds] [monitor]"
+echo "  wall playlist shuffle <name> [seconds] [monitor]"
 echo "  wall update [--force]"
 echo "  wall version"
 ;;

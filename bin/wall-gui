@@ -132,6 +132,32 @@ def load_config():
     return conf
 
 
+PLAYLISTS_DIR = os.path.expanduser("~/.config/wall/playlists")
+
+
+def load_playlists():
+    """Return sorted list of playlist names."""
+    if not os.path.isdir(PLAYLISTS_DIR):
+        return []
+    return sorted(
+        f for f in os.listdir(PLAYLISTS_DIR)
+        if os.path.isfile(os.path.join(PLAYLISTS_DIR, f))
+    )
+
+
+def load_playlist_ids(name):
+    """Return ordered list of IDs in a named playlist."""
+    path = os.path.join(PLAYLISTS_DIR, name)
+    if not os.path.exists(path):
+        return []
+    with open(path) as f:
+        return [line.strip() for line in f if line.strip()]
+
+
+def playlist_cmd(subcmd, *args):
+    wall_cmd("playlist", subcmd, *args)
+
+
 ########################################
 # SETTINGS WINDOW
 ########################################
@@ -211,6 +237,291 @@ class SettingsWindow(Gtk.Window):
 
 
 ########################################
+# PLAYLIST WINDOW
+########################################
+
+class PlaylistWindow(Gtk.Window):
+
+    def __init__(self, parent, all_walls):
+        super().__init__(title="Playlists", transient_for=parent)
+        self.set_default_size(800, 520)
+        self.all_walls = {w["id"]: w["title"] for w in all_walls}
+        self._selected_playlist = None
+
+        self._build_ui()
+        self._refresh_playlists()
+
+    def _build_ui(self):
+        root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self.set_child(root)
+
+        # Toolbar
+        toolbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        toolbar.set_margin_top(8)
+        toolbar.set_margin_bottom(8)
+        toolbar.set_margin_start(8)
+        toolbar.set_margin_end(8)
+
+        new_btn = Gtk.Button(label="New Playlist")
+        new_btn.connect("clicked", self._on_new_playlist)
+        toolbar.append(new_btn)
+
+        self._delete_btn = Gtk.Button(label="Delete")
+        self._delete_btn.set_sensitive(False)
+        self._delete_btn.connect("clicked", self._on_delete_playlist)
+        toolbar.append(self._delete_btn)
+
+        spacer = Gtk.Box()
+        spacer.set_hexpand(True)
+        toolbar.append(spacer)
+
+        monitors = get_monitors()
+        mon_choices = monitors + (["ALL"] if len(monitors) > 1 else [])
+        mon_model = Gtk.StringList.new(mon_choices)
+        self._mon_drop = Gtk.DropDown(model=mon_model)
+        if len(monitors) > 1:
+            self._mon_drop.set_selected(len(monitors))
+        toolbar.append(self._mon_drop)
+
+        self._play_btn = Gtk.Button(label="Play")
+        self._play_btn.add_css_class("suggested-action")
+        self._play_btn.set_sensitive(False)
+        self._play_btn.connect("clicked", self._on_play)
+        toolbar.append(self._play_btn)
+
+        self._shuffle_btn = Gtk.Button(label="Shuffle")
+        self._shuffle_btn.set_sensitive(False)
+        self._shuffle_btn.connect("clicked", self._on_shuffle)
+        toolbar.append(self._shuffle_btn)
+
+        root.append(toolbar)
+        root.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
+
+        paned = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
+        paned.set_vexpand(True)
+        paned.set_position(220)
+        root.append(paned)
+
+        # Left: playlist list
+        left_scroll = Gtk.ScrolledWindow()
+        left_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        self._pl_listbox = Gtk.ListBox()
+        self._pl_listbox.set_selection_mode(Gtk.SelectionMode.SINGLE)
+        self._pl_listbox.connect("row-selected", self._on_pl_selected)
+        left_scroll.set_child(self._pl_listbox)
+        paned.set_start_child(left_scroll)
+        paned.set_shrink_start_child(False)
+
+        # Right: contents
+        right_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+
+        right_toolbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        right_toolbar.set_margin_top(8)
+        right_toolbar.set_margin_bottom(8)
+        right_toolbar.set_margin_start(8)
+        right_toolbar.set_margin_end(8)
+
+        self._remove_btn = Gtk.Button(label="Remove Selected")
+        self._remove_btn.set_sensitive(False)
+        self._remove_btn.connect("clicked", self._on_remove_entry)
+        right_toolbar.append(self._remove_btn)
+
+        right_box.append(right_toolbar)
+        right_box.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
+
+        right_scroll = Gtk.ScrolledWindow()
+        right_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        right_scroll.set_vexpand(True)
+        self._content_listbox = Gtk.ListBox()
+        self._content_listbox.set_selection_mode(Gtk.SelectionMode.MULTIPLE)
+        right_scroll.set_child(self._content_listbox)
+        right_box.append(right_scroll)
+
+        paned.set_end_child(right_box)
+        paned.set_shrink_end_child(False)
+
+    def _refresh_playlists(self):
+        child = self._pl_listbox.get_first_child()
+        while child:
+            nxt = child.get_next_sibling()
+            self._pl_listbox.remove(child)
+            child = nxt
+
+        for name in load_playlists():
+            row = Gtk.ListBoxRow()
+            row.pl_name = name
+            ids = load_playlist_ids(name)
+            lbl = Gtk.Label(label=f"{name}  ({len(ids)})")
+            lbl.set_halign(Gtk.Align.START)
+            lbl.set_margin_top(6)
+            lbl.set_margin_bottom(6)
+            lbl.set_margin_start(12)
+            lbl.set_margin_end(12)
+            row.set_child(lbl)
+            self._pl_listbox.append(row)
+
+        self._selected_playlist = None
+        self._delete_btn.set_sensitive(False)
+        self._play_btn.set_sensitive(False)
+        self._shuffle_btn.set_sensitive(False)
+        self._refresh_contents()
+
+    def _refresh_contents(self):
+        child = self._content_listbox.get_first_child()
+        while child:
+            nxt = child.get_next_sibling()
+            self._content_listbox.remove(child)
+            child = nxt
+        self._remove_btn.set_sensitive(False)
+
+        if not self._selected_playlist:
+            return
+
+        self._content_listbox.connect(
+            "selected-rows-changed",
+            lambda _: self._remove_btn.set_sensitive(
+                bool(self._content_listbox.get_selected_rows())
+            )
+        )
+
+        for wall_id in load_playlist_ids(self._selected_playlist):
+            row = Gtk.ListBoxRow()
+            row.wall_id = wall_id
+            title = self.all_walls.get(wall_id, "[unknown]")
+            box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+            box.set_margin_top(4)
+            box.set_margin_bottom(4)
+            box.set_margin_start(12)
+            box.set_margin_end(12)
+            lbl = Gtk.Label(label=title)
+            lbl.set_halign(Gtk.Align.START)
+            lbl.set_hexpand(True)
+            lbl.set_ellipsize(Pango.EllipsizeMode.END)
+            id_lbl = Gtk.Label(label=wall_id)
+            id_lbl.add_css_class("dim-label")
+            box.append(lbl)
+            box.append(id_lbl)
+            row.set_child(box)
+            self._content_listbox.append(row)
+
+    def _on_pl_selected(self, _lb, row):
+        if row is None:
+            self._selected_playlist = None
+            self._delete_btn.set_sensitive(False)
+            self._play_btn.set_sensitive(False)
+            self._shuffle_btn.set_sensitive(False)
+            self._refresh_contents()
+            return
+        self._selected_playlist = row.pl_name
+        ids = load_playlist_ids(row.pl_name)
+        has_entries = len(ids) > 0
+        self._delete_btn.set_sensitive(True)
+        self._play_btn.set_sensitive(has_entries)
+        self._shuffle_btn.set_sensitive(has_entries)
+        self._refresh_contents()
+
+    def _on_new_playlist(self, _btn):
+        win = Gtk.Window(title="New Playlist", transient_for=self, modal=True)
+        win.set_default_size(320, 120)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        box.set_margin_top(16)
+        box.set_margin_bottom(16)
+        box.set_margin_start(16)
+        box.set_margin_end(16)
+        entry = Gtk.Entry()
+        entry.set_placeholder_text("Playlist name")
+        box.append(entry)
+        btn_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        ok_btn = Gtk.Button(label="Create")
+        ok_btn.add_css_class("suggested-action")
+        cancel_btn = Gtk.Button(label="Cancel")
+        cancel_btn.connect("clicked", lambda _: win.close())
+        btn_row.append(cancel_btn)
+        btn_row.append(ok_btn)
+        box.append(btn_row)
+        win.set_child(box)
+
+        def _do_create(_b):
+            name = entry.get_text().strip()
+            if name:
+                playlist_cmd("create", name)
+                win.close()
+                self._refresh_playlists()
+
+        ok_btn.connect("clicked", _do_create)
+        entry.connect("activate", _do_create)
+        win.present()
+
+    def _on_delete_playlist(self, _btn):
+        if not self._selected_playlist:
+            return
+        confirm = Gtk.Window(title="Delete Playlist", transient_for=self, modal=True)
+        confirm.set_default_size(300, 120)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        box.set_margin_top(16)
+        box.set_margin_bottom(16)
+        box.set_margin_start(16)
+        box.set_margin_end(16)
+        lbl = Gtk.Label(label=f"Delete playlist '{self._selected_playlist}'?")
+        lbl.set_wrap(True)
+        box.append(lbl)
+        btn_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        yes_btn = Gtk.Button(label="Delete")
+        yes_btn.add_css_class("destructive-action")
+        no_btn = Gtk.Button(label="Cancel")
+        no_btn.connect("clicked", lambda _: confirm.close())
+        btn_row.append(no_btn)
+        btn_row.append(yes_btn)
+        box.append(btn_row)
+        confirm.set_child(box)
+
+        def _do_delete(_b):
+            playlist_cmd("delete", self._selected_playlist)
+            confirm.close()
+            self._refresh_playlists()
+
+        yes_btn.connect("clicked", _do_delete)
+        confirm.present()
+
+    def _on_remove_entry(self, _btn):
+        if not self._selected_playlist:
+            return
+        selected_rows = self._content_listbox.get_selected_rows()
+        ids_to_remove = [r.wall_id for r in selected_rows]
+        for wid in ids_to_remove:
+            playlist_cmd("remove", self._selected_playlist, wid)
+        pl_name = self._selected_playlist
+        self._refresh_playlists()
+        # Re-select the same playlist
+        child = self._pl_listbox.get_first_child()
+        while child:
+            if hasattr(child, "pl_name") and child.pl_name == pl_name:
+                self._pl_listbox.select_row(child)
+                break
+            child = child.get_next_sibling()
+
+    def _on_play(self, _btn):
+        if not self._selected_playlist:
+            return
+        item = self._mon_drop.get_selected_item()
+        monitor = item.get_string() if item else "ALL"
+        args = ["playlist", "play", self._selected_playlist, "300"]
+        if monitor != "ALL":
+            args.append(monitor)
+        wall_cmd(*args)
+
+    def _on_shuffle(self, _btn):
+        if not self._selected_playlist:
+            return
+        item = self._mon_drop.get_selected_item()
+        monitor = item.get_string() if item else "ALL"
+        args = ["playlist", "shuffle", self._selected_playlist, "300"]
+        if monitor != "ALL":
+            args.append(monitor)
+        wall_cmd(*args)
+
+
+########################################
 # WINDOW
 ########################################
 
@@ -249,6 +560,11 @@ class WallGui(Gtk.ApplicationWindow):
         self.search.set_hexpand(True)
         self.search.connect("search-changed", lambda _: self.listbox.invalidate_filter())
         search_bar.append(self.search)
+
+        playlists_btn = Gtk.Button(label="Playlists")
+        playlists_btn.set_tooltip_text("Manage Playlists")
+        playlists_btn.connect("clicked", self._on_playlists)
+        search_bar.append(playlists_btn)
 
         settings_btn = Gtk.Button(label="⚙")
         settings_btn.set_tooltip_text("Settings")
@@ -392,6 +708,11 @@ class WallGui(Gtk.ApplicationWindow):
             self.mon_drop.set_selected(len(self.monitors))
         action.append(self.mon_drop)
 
+        self.playlist_btn = Gtk.Button(label="Add to Playlist")
+        self.playlist_btn.set_sensitive(False)
+        self.playlist_btn.connect("clicked", self._on_add_to_playlist)
+        action.append(self.playlist_btn)
+
         self.open_btn = Gtk.Button(label="Open in Steam")
         self.open_btn.set_sensitive(False)
         self.open_btn.connect("clicked", self._on_open_steam)
@@ -504,6 +825,7 @@ class WallGui(Gtk.ApplicationWindow):
         self.apply_btn.set_sensitive(True)
         self.share_btn.set_sensitive(True)
         self.open_btn.set_sensitive(True)
+        self.playlist_btn.set_sensitive(True)
 
         info = load_info(wall["id"])
 
@@ -723,6 +1045,84 @@ class WallGui(Gtk.ApplicationWindow):
 
     def _on_settings(self, _btn):
         win = SettingsWindow(self)
+        win.present()
+
+    def _on_playlists(self, _btn):
+        win = PlaylistWindow(self, self.wallpapers)
+        win.present()
+
+    def _on_add_to_playlist(self, _btn):
+        if not self.selected_id:
+            return
+
+        playlists = load_playlists()
+        if not playlists:
+            dialog = Gtk.Window(title="Add to Playlist", transient_for=self, modal=True)
+            dialog.set_default_size(280, 100)
+            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+            box.set_margin_top(16)
+            box.set_margin_bottom(16)
+            box.set_margin_start(16)
+            box.set_margin_end(16)
+            box.append(Gtk.Label(label="No playlists yet. Create one first."))
+            ok = Gtk.Button(label="OK")
+            ok.connect("clicked", lambda _: dialog.close())
+            box.append(ok)
+            dialog.set_child(box)
+            dialog.present()
+            return
+
+        win = Gtk.Window(title="Add to Playlist", transient_for=self, modal=True)
+        win.set_default_size(260, 300)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        box.set_margin_top(8)
+        box.set_margin_bottom(8)
+        box.set_margin_start(8)
+        box.set_margin_end(8)
+
+        lbl = Gtk.Label(label="Select playlist:")
+        lbl.set_halign(Gtk.Align.START)
+        box.append(lbl)
+
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroll.set_vexpand(True)
+        lb = Gtk.ListBox()
+        lb.set_selection_mode(Gtk.SelectionMode.SINGLE)
+        for pl_name in playlists:
+            row = Gtk.ListBoxRow()
+            row.pl_name = pl_name
+            row_lbl = Gtk.Label(label=pl_name)
+            row_lbl.set_halign(Gtk.Align.START)
+            row_lbl.set_margin_top(6)
+            row_lbl.set_margin_bottom(6)
+            row_lbl.set_margin_start(8)
+            row_lbl.set_margin_end(8)
+            row.set_child(row_lbl)
+            lb.append(row)
+        scroll.set_child(lb)
+        box.append(scroll)
+
+        btn_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        add_btn = Gtk.Button(label="Add")
+        add_btn.add_css_class("suggested-action")
+        cancel_btn = Gtk.Button(label="Cancel")
+        cancel_btn.connect("clicked", lambda _: win.close())
+        btn_row.append(cancel_btn)
+        btn_row.append(add_btn)
+        box.append(btn_row)
+        win.set_child(box)
+
+        wall_id = self.selected_id
+
+        def _do_add(_b):
+            selected_row = lb.get_selected_row()
+            if selected_row:
+                playlist_cmd("add", selected_row.pl_name, wall_id)
+                win.close()
+
+        add_btn.connect("clicked", _do_add)
+        lb.connect("row-activated", lambda _lb, _row: _do_add(None))
         win.present()
 
     # --------------------------------------------------
