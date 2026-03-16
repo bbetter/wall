@@ -4,7 +4,7 @@
 # CONFIG
 ########################################
 
-VERSION="0.9.0"
+VERSION="0.9.1"
 
 CONFIG_FILE="$HOME/.config/wall/config"
 
@@ -219,6 +219,9 @@ for d in "$WORKSHOP_DIR"/*; do
             local FILE
             FILE=$(jq -r '.file // ""' "$d/project.json")
             [ -n "$FILE" ] && { [ -f "$d/$FILE" ] || [ -f "$d/${FILE%.json}.pkg" ]; } || continue
+            printf "%s\t%s\t%s\t%s\t%s\n" "$ID" "$TITLE" "$TAGS" "$TYPE" "$DESC"
+        ;;
+        web|application)
             printf "%s\t%s\t%s\t%s\t%s\n" "$ID" "$TITLE" "$TAGS" "$TYPE" "$DESC"
         ;;
     esac
@@ -1026,6 +1029,7 @@ info)
     ] | sort_by(.order) | map(del(.order))' "$INFO_DIR/project.json" 2>/dev/null || echo "[]")
     INFO_TYPE_RAW=$(jq -r '.type // ""' "$INFO_DIR/project.json")
     INFO_WARNINGS="[]"
+    INFO_UNSUPPORTED="false"
     if [ "$INFO_TYPE_RAW" = "scene" ]; then
         mkdir -p "$CHECKS_DIR"
         CHECK_FILE="$CHECKS_DIR/$INFO_ID"
@@ -1044,16 +1048,22 @@ info)
         else
             INFO_WARNINGS=$(cat "$CHECK_FILE")
         fi
+        # Always append the general scene caveat
+        INFO_WARNINGS=$(printf '%s' "$INFO_WARNINGS" | jq '. + ["Some scene features may not be fully supported yet"]')
+    elif [ "$INFO_TYPE_RAW" = "web" ] || [ "$INFO_TYPE_RAW" = "application" ]; then
+        INFO_UNSUPPORTED="true"
     fi
     jq --arg id "$INFO_ID" --arg thumb "$INFO_THUMB" \
         --argjson video "$INFO_VIDEO" \
         --argjson props "$INFO_PROPS" \
         --argjson warnings "$INFO_WARNINGS" \
+        --argjson unsupported "$INFO_UNSUPPORTED" \
         --argjson excluded "$(grep -qxF "$INFO_ID" "$EXCLUDED_FILE" 2>/dev/null && echo true || echo false)" \
         '. + {id: $id, thumbnail: $thumb, excluded: $excluded}
           + (if $video != {} then {video: $video} else {} end)
           + (if ($props | length) > 0 then {properties: $props} else {} end)
-          + (if ($warnings | length) > 0 then {warnings: $warnings} else {} end)' \
+          + (if ($warnings | length) > 0 then {warnings: $warnings} else {} end)
+          + (if $unsupported then {unsupported: true} else {} end)' \
         "$INFO_DIR/project.json"
 ;;
 

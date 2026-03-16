@@ -581,8 +581,8 @@ class WallGui(Gtk.ApplicationWindow):
         filter_bar.set_margin_bottom(6)
 
         self._type_btns = {}
-        for label, typ in [("All", ""), ("Video", "video"), ("Scene", "scene"),
-                            ("Web", "web"), ("Application", "application")]:
+        for label, typ in [("All", ""), ("Video", "video"), ("⚠ Scene", "scene"),
+                            ("⛔ Web", "web"), ("⛔ Application", "application")]:
             btn = Gtk.ToggleButton(label=label)
             btn.set_active(typ == "")
             btn.connect("clicked", self._on_type_filter, typ)
@@ -654,6 +654,28 @@ class WallGui(Gtk.ApplicationWindow):
         self._warn_box.append(self._warn_label)
 
         right.append(self._warn_box)
+
+        # unsupported type error banner (hidden by default)
+        self._error_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        self._error_box.set_margin_top(4)
+        self._error_box.set_margin_bottom(4)
+        self._error_box.set_margin_start(4)
+        self._error_box.set_margin_end(4)
+        self._error_box.add_css_class("card")
+        self._error_box.set_visible(False)
+
+        error_icon = Gtk.Label(label="⛔")
+        self._error_box.append(error_icon)
+
+        self._error_label = Gtk.Label(label="")
+        self._error_label.set_halign(Gtk.Align.START)
+        self._error_label.set_wrap(True)
+        self._error_label.set_hexpand(True)
+        self._error_label.set_use_markup(True)
+        self._error_label.add_css_class("error")
+        self._error_box.append(self._error_label)
+
+        right.append(self._error_box)
 
         self.title_label = Gtk.Label(label="Select a wallpaper")
         self.title_label.set_halign(Gtk.Align.START)
@@ -856,6 +878,16 @@ class WallGui(Gtk.ApplicationWindow):
         self.playlist_btn.set_sensitive(True)
 
         info = load_info(wall["id"])
+
+        if info.get("unsupported", False):
+            wtype = info.get("type", "").capitalize()
+            self._error_label.set_markup(
+                f"<big><b>{wtype} wallpapers are not supported by linux-wallpaperengine "
+                f"and may crash or display incorrectly.</b></big>"
+            )
+            self._error_box.set_visible(True)
+        else:
+            self._error_box.set_visible(False)
 
         warnings = info.get("warnings", [])
         if warnings:
