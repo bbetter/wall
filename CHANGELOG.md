@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.9.3
+- Favorites playlist: protected built-in playlist, ★/☆ toggle in detail panel, ★ badge in list
+- Drag-and-drop reordering of entries in any playlist (⠿ handle)
+- `wall version` now fetches and prints current version's release notes
+- `wall version --all` prints the full changelog
+- `wall update` prints what's new after a successful update
+- `wall update --whatsnew` shows next version's notes without updating
+
 ## v0.9.2
 - Silent toggle and volume slider in global settings
 - Volume passed as `--volume` flag to linux-wallpaperengine when audio is enabled
