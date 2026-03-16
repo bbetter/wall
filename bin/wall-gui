@@ -9,6 +9,7 @@ import os
 import re
 import subprocess
 import shutil
+import threading
 
 MEDIA_EXTS = {".mp4", ".webm", ".gif"}
 
@@ -536,10 +537,16 @@ class WallGui(Gtk.ApplicationWindow):
         self.monitors       = get_monitors()
         self._current_media = None
         self._staged_props  = {}
+        self._debounce_id   = None
+        self._desc_expanded = False
         self._type_filter   = ""
 
         self._build_ui()
         self._populate_list()
+        self._update_count()
+        self._refresh_status()
+        GLib.timeout_add(3000, self._refresh_status)
+        self._setup_keyboard()
 
     # --------------------------------------------------
     # UI
@@ -559,8 +566,13 @@ class WallGui(Gtk.ApplicationWindow):
         self.search = Gtk.SearchEntry()
         self.search.set_placeholder_text("Search by title or tags…")
         self.search.set_hexpand(True)
-        self.search.connect("search-changed", lambda _: self.listbox.invalidate_filter())
+        self.search.connect("search-changed", self._on_search_changed)
         search_bar.append(self.search)
+
+        refresh_btn = Gtk.Button(label="↻")
+        refresh_btn.set_tooltip_text("Refresh wallpaper list")
+        refresh_btn.connect("clicked", self._on_refresh)
+        search_bar.append(refresh_btn)
 
         playlists_btn = Gtk.Button(label="Playlists")
         playlists_btn.set_tooltip_text("Manage Playlists")
@@ -589,6 +601,14 @@ class WallGui(Gtk.ApplicationWindow):
             filter_bar.append(btn)
             self._type_btns[typ] = btn
 
+        count_spacer = Gtk.Box()
+        count_spacer.set_hexpand(True)
+        filter_bar.append(count_spacer)
+
+        self._count_label = Gtk.Label(label="")
+        self._count_label.add_css_class("dim-label")
+        filter_bar.append(self._count_label)
+
         root.append(filter_bar)
 
         root.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
@@ -598,6 +618,23 @@ class WallGui(Gtk.ApplicationWindow):
         paned.set_vexpand(True)
         paned.set_position(340)
         root.append(paned)
+
+        root.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
+
+        status_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+        status_bar.set_margin_top(4)
+        status_bar.set_margin_bottom(4)
+        status_bar.set_margin_start(8)
+        status_bar.set_margin_end(8)
+
+        self._status_label = Gtk.Label(label="No wallpaper active")
+        self._status_label.set_halign(Gtk.Align.START)
+        self._status_label.add_css_class("dim-label")
+        self._status_label.set_ellipsize(Pango.EllipsizeMode.END)
+        self._status_label.set_hexpand(True)
+        status_bar.append(self._status_label)
+
+        root.append(status_bar)
 
         # left pane — list
         scroll = Gtk.ScrolledWindow()
@@ -677,11 +714,22 @@ class WallGui(Gtk.ApplicationWindow):
 
         right.append(self._error_box)
 
+        title_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        title_row.set_hexpand(True)
+
         self.title_label = Gtk.Label(label="Select a wallpaper")
         self.title_label.set_halign(Gtk.Align.START)
         self.title_label.set_wrap(True)
+        self.title_label.set_hexpand(True)
         self.title_label.add_css_class("title-3")
-        right.append(self.title_label)
+        title_row.append(self.title_label)
+
+        self._spinner = Gtk.Spinner()
+        self._spinner.set_visible(False)
+        self._spinner.set_valign(Gtk.Align.CENTER)
+        title_row.append(self._spinner)
+
+        right.append(title_row)
 
         meta_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         right.append(meta_row)
@@ -711,7 +759,16 @@ class WallGui(Gtk.ApplicationWindow):
         self.desc_label.set_wrap(True)
         self.desc_label.set_max_width_chars(48)
         self.desc_label.set_use_markup(True)
+        self.desc_label.set_lines(4)
+        self.desc_label.set_ellipsize(Pango.EllipsizeMode.END)
         right.append(self.desc_label)
+
+        self._show_more_btn = Gtk.Button(label="Show more")
+        self._show_more_btn.set_halign(Gtk.Align.START)
+        self._show_more_btn.add_css_class("flat")
+        self._show_more_btn.set_visible(False)
+        self._show_more_btn.connect("clicked", self._on_toggle_desc)
+        right.append(self._show_more_btn)
 
         self.tags_label = Gtk.Label(label="")
         self.tags_label.set_halign(Gtk.Align.START)
@@ -742,27 +799,47 @@ class WallGui(Gtk.ApplicationWindow):
             self.mon_drop.set_selected(len(self.monitors))
         action.append(self.mon_drop)
 
-        self.playlist_btn = Gtk.Button(label="Add to Playlist")
-        self.playlist_btn.set_sensitive(False)
-        self.playlist_btn.connect("clicked", self._on_add_to_playlist)
-        action.append(self.playlist_btn)
-
-        self.open_btn = Gtk.Button(label="Open in Steam")
-        self.open_btn.set_sensitive(False)
-        self.open_btn.connect("clicked", self._on_open_steam)
-        action.append(self.open_btn)
-
-        self.share_btn = Gtk.Button(label="Share")
-        self.share_btn.set_sensitive(False)
-        self.share_btn.connect("clicked", self._on_share)
-        action.append(self.share_btn)
-
         self.apply_btn = Gtk.Button(label="Apply")
         self.apply_btn.add_css_class("suggested-action")
         self.apply_btn.set_hexpand(True)
         self.apply_btn.set_sensitive(False)
         self.apply_btn.connect("clicked", self._on_apply)
         action.append(self.apply_btn)
+
+        # Secondary actions in overflow popover
+        overflow_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        overflow_box.set_margin_top(4)
+        overflow_box.set_margin_bottom(4)
+        overflow_box.set_margin_start(4)
+        overflow_box.set_margin_end(4)
+
+        self.playlist_btn = Gtk.Button(label="Add to Playlist")
+        self.playlist_btn.set_sensitive(False)
+        self.playlist_btn.add_css_class("flat")
+        self.playlist_btn.connect("clicked", self._on_add_to_playlist)
+        overflow_box.append(self.playlist_btn)
+
+        self.open_btn = Gtk.Button(label="Open in Steam")
+        self.open_btn.set_sensitive(False)
+        self.open_btn.add_css_class("flat")
+        self.open_btn.connect("clicked", self._on_open_steam)
+        overflow_box.append(self.open_btn)
+
+        self.share_btn = Gtk.Button(label="Copy Steam URL")
+        self.share_btn.set_sensitive(False)
+        self.share_btn.add_css_class("flat")
+        self.share_btn.connect("clicked", self._on_share)
+        overflow_box.append(self.share_btn)
+
+        self._overflow_popover = Gtk.Popover()
+        self._overflow_popover.set_child(overflow_box)
+        self._overflow_popover.set_has_arrow(False)
+
+        overflow_btn = Gtk.MenuButton()
+        overflow_btn.set_label("⋮")
+        overflow_btn.set_tooltip_text("More actions")
+        overflow_btn.set_popover(self._overflow_popover)
+        action.append(overflow_btn)
 
         self.search.grab_focus()
 
@@ -843,10 +920,7 @@ class WallGui(Gtk.ApplicationWindow):
     # CALLBACKS
     # --------------------------------------------------
 
-    def _filter(self, row):
-        if not hasattr(row, "wall"):
-            return True
-        w = row.wall
+    def _matches_filter(self, w):
         if self._type_filter and w["type"].lower() != self._type_filter:
             return False
         query = self.search.get_text().lower()
@@ -854,30 +928,82 @@ class WallGui(Gtk.ApplicationWindow):
             return True
         return query in w["title"].lower() or query in w["tags"].lower() or query in w["desc"].lower()
 
+    def _filter(self, row):
+        if not hasattr(row, "wall"):
+            return True
+        return self._matches_filter(row.wall)
+
+    def _on_search_changed(self, _entry):
+        self.listbox.invalidate_filter()
+        self._update_count()
+
+    def _update_count(self):
+        count = sum(1 for w in self.wallpapers if self._matches_filter(w))
+        total = len(self.wallpapers)
+        self._count_label.set_text(
+            f"{total} wallpapers" if count == total else f"{count} / {total}"
+        )
+
     def _on_type_filter(self, btn, typ):
-        # mutual exclusion: deactivate all others
         for t, b in self._type_btns.items():
             if t != typ:
                 b.set_active(False)
-        # if clicking the already-active button, keep it active (can't deselect)
         if not btn.get_active():
             btn.set_active(True)
             return
         self._type_filter = typ
         self.listbox.invalidate_filter()
+        self._update_count()
 
     def _on_selected(self, _listbox, row):
-        """Single click — update preview panel via wall info."""
-        if row is None:
+        """Single click — immediately enable actions, then async-load details."""
+        if row is None or not hasattr(row, "wall"):
             return
         wall = row.wall
         self.selected_id = wall["id"]
+
         self.apply_btn.set_sensitive(True)
         self.share_btn.set_sensitive(True)
         self.open_btn.set_sensitive(True)
         self.playlist_btn.set_sensitive(True)
 
-        info = load_info(wall["id"])
+        # Reset panel to cached data while full info loads
+        self.title_label.set_text(wall["title"])
+        self.type_label.set_text(wall["type"])
+        self.active_label.set_text("· active" if wall["active"] else "")
+        self.visibility_label.set_text("")
+        self.resolution_label.set_text("")
+        self.desc_label.set_text("")
+        self.desc_label.set_visible(False)
+        self._show_more_btn.set_visible(False)
+        self.tags_label.set_text("")
+        self.id_label.set_text(f"ID: {wall['id']}")
+        self._warn_box.set_visible(False)
+        self._error_box.set_visible(False)
+
+        # Cancel any pending debounce
+        if self._debounce_id is not None:
+            GLib.source_remove(self._debounce_id)
+        self._debounce_id = GLib.timeout_add(150, self._start_load_info, wall)
+
+    def _start_load_info(self, wall):
+        self._debounce_id = None
+        load_id = wall["id"]
+        self._spinner.start()
+        self._spinner.set_visible(True)
+
+        def _load():
+            info = load_info(load_id)
+            GLib.idle_add(self._on_info_loaded, load_id, wall, info)
+
+        threading.Thread(target=_load, daemon=True).start()
+        return False
+
+    def _on_info_loaded(self, load_id, wall, info):
+        if load_id != self.selected_id:
+            return
+        self._spinner.stop()
+        self._spinner.set_visible(False)
 
         if info.get("unsupported", False):
             wtype = info.get("type", "").capitalize()
@@ -905,17 +1031,14 @@ class WallGui(Gtk.ApplicationWindow):
 
         video = info.get("video", {})
         if video and video.get("width"):
-            w, h   = video["width"], video["height"]
-            fps    = int(video.get("fps", 0))
-            dur    = int(video.get("duration", 0))
-            codec  = video.get("codec", "")
-            parts  = [f"{w}×{h}"]
-            if fps:
-                parts.append(f"{fps}fps")
-            if dur:
-                parts.append(f"{dur // 60}:{dur % 60:02d}")
-            if codec:
-                parts.append(codec)
+            w, h  = video["width"], video["height"]
+            fps   = int(video.get("fps", 0))
+            dur   = int(video.get("duration", 0))
+            codec = video.get("codec", "")
+            parts = [f"{w}×{h}"]
+            if fps:   parts.append(f"{fps}fps")
+            if dur:   parts.append(f"{dur // 60}:{dur % 60:02d}")
+            if codec: parts.append(codec)
             self.resolution_label.set_text(" · ".join(parts))
         else:
             self.resolution_label.set_text("")
@@ -929,6 +1052,12 @@ class WallGui(Gtk.ApplicationWindow):
         else:
             self.desc_label.set_text("")
         self.desc_label.set_visible(bool(desc))
+
+        self._desc_expanded = False
+        self.desc_label.set_lines(4)
+        self.desc_label.set_ellipsize(Pango.EllipsizeMode.END)
+        self._show_more_btn.set_visible(bool(desc) and len(desc) > 200)
+        self._show_more_btn.set_label("Show more")
 
         tags = ", ".join(info.get("tags", [])) or wall["tags"]
         self.tags_label.set_text(f"Tags: {tags}" if tags else "")
@@ -1089,6 +1218,72 @@ class WallGui(Gtk.ApplicationWindow):
         if 0 <= idx < len(values):
             self._staged_props[key] = values[idx]
 
+    def _on_toggle_desc(self, _btn):
+        self._desc_expanded = not self._desc_expanded
+        if self._desc_expanded:
+            self.desc_label.set_lines(0)
+            self.desc_label.set_ellipsize(Pango.EllipsizeMode.NONE)
+            self._show_more_btn.set_label("Show less")
+        else:
+            self.desc_label.set_lines(4)
+            self.desc_label.set_ellipsize(Pango.EllipsizeMode.END)
+            self._show_more_btn.set_label("Show more")
+
+    def _on_refresh(self, _btn):
+        self.wallpapers = load_wallpapers()
+        child = self.listbox.get_first_child()
+        while child:
+            nxt = child.get_next_sibling()
+            self.listbox.remove(child)
+            child = nxt
+        self._populate_list()
+        self._update_count()
+        self._refresh_status()
+
+    def _refresh_status(self):
+        mon_dir = os.path.expanduser("~/.cache/wall/monitors")
+        parts = []
+        if os.path.isdir(mon_dir):
+            id_to_title = {w["id"]: w["title"] for w in self.wallpapers}
+            for mon in sorted(os.listdir(mon_dir)):
+                mon_path = os.path.join(mon_dir, mon)
+                if not os.path.isdir(mon_path):
+                    continue
+                current_f = os.path.join(mon_path, "current")
+                mode_f    = os.path.join(mon_path, "mode")
+                if not os.path.exists(current_f):
+                    continue
+                try:
+                    with open(current_f) as f:
+                        wid = f.read().strip()
+                    title = id_to_title.get(wid, wid)
+                    mode = ""
+                    if os.path.exists(mode_f):
+                        with open(mode_f) as f:
+                            m = f.read().strip()
+                        if m and m != "idle":
+                            mode = f" [{m}]"
+                    parts.append(f"{mon}: {title}{mode}")
+                except OSError:
+                    pass
+        self._status_label.set_text("  |  ".join(parts) if parts else "No wallpaper active")
+        return True
+
+    def _setup_keyboard(self):
+        ctrl = Gtk.EventControllerKey.new()
+        ctrl.connect("key-pressed", self._on_key_pressed)
+        self.add_controller(ctrl)
+
+    def _on_key_pressed(self, _ctrl, keyval, _keycode, _state):
+        if keyval == Gdk.KEY_Escape:
+            if self.search.get_text():
+                self.search.set_text("")
+                return True
+        if keyval == Gdk.KEY_slash and not self.search.has_focus():
+            self.search.grab_focus()
+            return True
+        return False
+
     def _on_settings(self, _btn):
         win = SettingsWindow(self)
         win.present()
@@ -1100,6 +1295,7 @@ class WallGui(Gtk.ApplicationWindow):
     def _on_add_to_playlist(self, _btn):
         if not self.selected_id:
             return
+        self._overflow_popover.popdown()
 
         playlists = load_playlists()
         if not playlists:
@@ -1187,14 +1383,14 @@ class WallGui(Gtk.ApplicationWindow):
     def _on_open_steam(self, _btn):
         if not self.selected_id:
             return
+        self._overflow_popover.popdown()
         subprocess.Popen(["xdg-open", self._steam_url()])
 
-    def _on_share(self, btn):
+    def _on_share(self, _btn):
         if not self.selected_id:
             return
+        self._overflow_popover.popdown()
         Gdk.Display.get_default().get_clipboard().set(self._steam_url())
-        btn.set_label("Copied!")
-        GLib.timeout_add(1500, lambda: btn.set_label("Share") or False)
 
     def _on_apply(self, _btn):
         if not self.selected_id:
