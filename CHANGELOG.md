@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.9.5
+- Fix: global settings (FPS, scaling, audio, volume, fullscreen pause) were never actually applied — config was sourced before defaults were set, so defaults always won; fixed load order
+- This means all `wall set` changes now take effect properly for the first time
+
 ## v0.9.4
 - Fix: settings apply now restores wallpapers (daemon restore logic on startup)
 - Fix: wallpapers on idle monitors no longer pause when a fullscreen app opens on another monitor

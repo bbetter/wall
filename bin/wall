@@ -4,12 +4,9 @@
 # CONFIG
 ########################################
 
-VERSION="0.9.4"
+VERSION="0.9.5"
 
 CONFIG_FILE="$HOME/.config/wall/config"
-
-# shellcheck source=/dev/null
-[ -f "$CONFIG_FILE" ] && source "$CONFIG_FILE"
 
 STEAM_LIB="${STEAM_LIB:-$HOME/.local/share/Steam/steamapps}"
 
@@ -29,11 +26,15 @@ PROPS_DIR="$HOME/.config/wall/props"
 EXCLUDED_FILE="$HOME/.config/wall/excluded"
 PLAYLISTS_DIR="$HOME/.config/wall/playlists"
 
+# Defaults — sourcing config after so config values win
 FPS=60
 SCALING=fill
 AUDIO=0
 VOLUME=15
 FULLSCREEN_PAUSE=0
+
+# shellcheck source=/dev/null
+[ -f "$CONFIG_FILE" ] && source "$CONFIG_FILE"
 
 mkdir -p "$STATE_DIR" "$MON_DIR"
 
