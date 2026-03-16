@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.0.1
+- Fix: clamp setting and per-wallpaper flags (disable-particles, disable-parallax, disable-mouse) were dropped by the v1.0.0 refactor; restored in both CLI and GUI
+
 ## v1.0.0
 - Stable release with fully documented codebase
 - Comprehensive doc comments on every function in `bin/wall` (bash) and every method in `bin/wall-gui` (Python)
