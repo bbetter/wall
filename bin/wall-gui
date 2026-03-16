@@ -2,7 +2,7 @@
 
 import gi
 gi.require_version('Gtk', '4.0')
-from gi.repository import Gtk, Gdk, GLib, Pango
+from gi.repository import Gtk, Gdk, GLib, GObject, Pango
 
 import json
 import os
@@ -121,7 +121,7 @@ def load_saved_props(wall_id):
 
 def load_config():
     """Read ~/.config/wall/config into a dict."""
-    conf = {"fps": "60", "scaling": "fill", "audio": "0"}
+    conf = {"fps": "60", "scaling": "fill", "audio": "0", "volume": "15"}
     config_file = os.path.expanduser("~/.config/wall/config")
     if os.path.exists(config_file):
         with open(config_file) as f:
@@ -134,6 +134,26 @@ def load_config():
 
 
 PLAYLISTS_DIR = os.path.expanduser("~/.config/wall/playlists")
+FAVORITES_NAME = "Favorites"
+
+
+def is_in_favorites(wall_id):
+    return wall_id in set(load_playlist_ids(FAVORITES_NAME))
+
+
+def toggle_favorite(wall_id):
+    """Add to Favorites if not present, remove if present. Auto-creates playlist."""
+    favs = load_playlist_ids(FAVORITES_NAME)
+    if wall_id in favs:
+        playlist_cmd("remove", FAVORITES_NAME, wall_id)
+        return False
+    else:
+        # Auto-create Favorites playlist if it doesn't exist yet
+        fav_path = os.path.join(PLAYLISTS_DIR, FAVORITES_NAME)
+        if not os.path.exists(fav_path):
+            playlist_cmd("create", FAVORITES_NAME)
+        playlist_cmd("add", FAVORITES_NAME, wall_id)
+        return True
 
 
 def load_playlists():
@@ -167,7 +187,7 @@ class SettingsWindow(Gtk.Window):
 
     def __init__(self, parent):
         super().__init__(title="Settings", transient_for=parent, modal=True)
-        self.set_default_size(360, 220)
+        self.set_default_size(400, 280)
         self.set_resizable(False)
 
         conf = load_config()
@@ -236,36 +256,65 @@ class SettingsWindow(Gtk.Window):
         scl_hint.add_css_class("dim-label")
         grid.attach(scl_hint, 2, 1, 1, 1)
 
-        # Audio
-        aud_lbl = Gtk.Label(label="Audio")
-        aud_lbl.set_halign(Gtk.Align.START)
-        aud_lbl.set_tooltip_text("Enable audio for wallpapers that have sound")
-        grid.attach(aud_lbl, 0, 2, 1, 1)
+        # Silent
+        sil_lbl = Gtk.Label(label="Silent")
+        sil_lbl.set_halign(Gtk.Align.START)
+        sil_lbl.set_tooltip_text("Mute all wallpaper audio")
+        grid.attach(sil_lbl, 0, 2, 1, 1)
 
-        self._aud_sw = Gtk.Switch()
-        self._aud_sw.set_active(conf.get("audio", "0") == "1")
-        self._aud_sw.set_halign(Gtk.Align.START)
-        self._aud_sw.set_valign(Gtk.Align.CENTER)
-        self._aud_sw.set_tooltip_text("Enable audio for wallpapers that have sound")
-        grid.attach(self._aud_sw, 1, 2, 1, 1)
+        self._sil_sw = Gtk.Switch()
+        self._sil_sw.set_active(conf.get("audio", "0") == "0")
+        self._sil_sw.set_halign(Gtk.Align.START)
+        self._sil_sw.set_valign(Gtk.Align.CENTER)
+        self._sil_sw.set_tooltip_text("Mute all wallpaper audio")
+        self._sil_sw.connect("notify::active", self._on_silent_toggled)
+        grid.attach(self._sil_sw, 1, 2, 1, 1)
 
-        aud_hint = Gtk.Label(label="for wallpapers with sound")
-        aud_hint.set_halign(Gtk.Align.START)
-        aud_hint.add_css_class("dim-label")
-        grid.attach(aud_hint, 2, 2, 1, 1)
+        sil_hint = Gtk.Label(label="mute all wallpaper audio")
+        sil_hint.set_halign(Gtk.Align.START)
+        sil_hint.add_css_class("dim-label")
+        grid.attach(sil_hint, 2, 2, 1, 1)
+
+        # Volume
+        vol_lbl = Gtk.Label(label="Volume")
+        vol_lbl.set_halign(Gtk.Align.START)
+        vol_lbl.set_tooltip_text("Playback volume (0–100)")
+        grid.attach(vol_lbl, 0, 3, 1, 1)
+
+        self._vol_scale = Gtk.Scale.new_with_range(
+            Gtk.Orientation.HORIZONTAL, 0, 100, 1
+        )
+        self._vol_scale.set_value(int(conf.get("volume", "15")))
+        self._vol_scale.set_draw_value(True)
+        self._vol_scale.set_value_pos(Gtk.PositionType.RIGHT)
+        self._vol_scale.set_hexpand(True)
+        self._vol_scale.set_size_request(160, -1)
+        self._vol_scale.set_tooltip_text("Playback volume (0–100)")
+        self._vol_scale.set_sensitive(not self._sil_sw.get_active())
+        grid.attach(self._vol_scale, 1, 3, 1, 1)
+
+        vol_hint = Gtk.Label(label="0–100")
+        vol_hint.set_halign(Gtk.Align.START)
+        vol_hint.add_css_class("dim-label")
+        grid.attach(vol_hint, 2, 3, 1, 1)
 
         apply_btn = Gtk.Button(label="Apply")
         apply_btn.add_css_class("suggested-action")
         apply_btn.connect("clicked", self._on_apply)
         box.append(apply_btn)
 
+    def _on_silent_toggled(self, sw, _param):
+        self._vol_scale.set_sensitive(not sw.get_active())
+
     def _on_apply(self, _btn):
         fps = str(int(self._fps_spin.get_value()))
         scaling = self._scaling_opts[self._scl_drop.get_selected()]
-        audio = "1" if self._aud_sw.get_active() else "0"
+        audio = "0" if self._sil_sw.get_active() else "1"
+        volume = str(int(self._vol_scale.get_value()))
         wall_cmd("set", "fps", fps)
         wall_cmd("set", "scaling", scaling)
         wall_cmd("set", "audio", audio)
+        wall_cmd("set", "volume", volume)
         self.close()
 
 
@@ -445,24 +494,7 @@ class PlaylistWindow(Gtk.Window):
         )
 
         for wall_id in load_playlist_ids(self._selected_playlist):
-            row = Gtk.ListBoxRow()
-            row.wall_id = wall_id
-            title = self.all_walls.get(wall_id, "[unknown]")
-            box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-            box.set_margin_top(4)
-            box.set_margin_bottom(4)
-            box.set_margin_start(12)
-            box.set_margin_end(12)
-            lbl = Gtk.Label(label=title)
-            lbl.set_halign(Gtk.Align.START)
-            lbl.set_hexpand(True)
-            lbl.set_ellipsize(Pango.EllipsizeMode.END)
-            id_lbl = Gtk.Label(label=wall_id)
-            id_lbl.add_css_class("dim-label")
-            box.append(lbl)
-            box.append(id_lbl)
-            row.set_child(box)
-            self._content_listbox.append(row)
+            self._content_listbox.append(self._make_content_row(wall_id))
 
     def _on_pl_selected(self, _lb, row):
         if row is None:
@@ -475,7 +507,7 @@ class PlaylistWindow(Gtk.Window):
         self._selected_playlist = row.pl_name
         ids = load_playlist_ids(row.pl_name)
         has_entries = len(ids) > 0
-        self._delete_btn.set_sensitive(True)
+        self._delete_btn.set_sensitive(row.pl_name != FAVORITES_NAME)
         self._play_btn.set_sensitive(has_entries)
         self._shuffle_btn.set_sensitive(has_entries)
         self._refresh_contents()
@@ -513,7 +545,7 @@ class PlaylistWindow(Gtk.Window):
         win.present()
 
     def _on_delete_playlist(self, _btn):
-        if not self._selected_playlist:
+        if not self._selected_playlist or self._selected_playlist == FAVORITES_NAME:
             return
         confirm = Gtk.Window(title="Delete Playlist", transient_for=self, modal=True)
         confirm.set_default_size(300, 120)
@@ -582,6 +614,86 @@ class PlaylistWindow(Gtk.Window):
             args.append(monitor)
         wall_cmd(*args)
 
+    def _make_content_row(self, wall_id):
+        row = Gtk.ListBoxRow()
+        row.wall_id = wall_id
+        title = self.all_walls.get(wall_id, "[unknown]")
+
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        box.set_margin_top(4)
+        box.set_margin_bottom(4)
+        box.set_margin_start(12)
+        box.set_margin_end(12)
+
+        handle = Gtk.Label(label="⠿")
+        handle.add_css_class("dim-label")
+        handle.set_tooltip_text("Drag to reorder")
+        box.append(handle)
+
+        lbl = Gtk.Label(label=title)
+        lbl.set_halign(Gtk.Align.START)
+        lbl.set_hexpand(True)
+        lbl.set_ellipsize(Pango.EllipsizeMode.END)
+        box.append(lbl)
+
+        id_lbl = Gtk.Label(label=wall_id)
+        id_lbl.add_css_class("dim-label")
+        box.append(id_lbl)
+
+        row.set_child(box)
+
+        # Drag source — provide this row's wall_id as a string
+        drag_src = Gtk.DragSource.new()
+        drag_src.set_actions(Gdk.DragAction.MOVE)
+        drag_src.connect("prepare", self._on_drag_prepare, row)
+        row.add_controller(drag_src)
+
+        # Drop target — accept a wall_id string and reorder
+        drop_tgt = Gtk.DropTarget.new(GObject.TYPE_STRING, Gdk.DragAction.MOVE)
+        drop_tgt.connect("drop", self._on_drop, row)
+        row.add_controller(drop_tgt)
+
+        return row
+
+    def _on_drag_prepare(self, _src, _x, _y, row):
+        v = GObject.Value(GObject.TYPE_STRING)
+        v.set_string(row.wall_id)
+        return Gdk.ContentProvider.new_for_value(v)
+
+    def _on_drop(self, _tgt, value, _x, y, target_row):
+        dragged_id = value
+        if dragged_id == target_row.wall_id or not self._selected_playlist:
+            return False
+        ids = load_playlist_ids(self._selected_playlist)
+        if dragged_id not in ids:
+            return False
+
+        # Find target index in current listbox
+        idx = 0
+        child = self._content_listbox.get_first_child()
+        target_idx = 0
+        while child:
+            if child is target_row:
+                target_idx = idx
+                break
+            idx += 1
+            child = child.get_next_sibling()
+
+        # Insert after if drop is in the lower half of the target row
+        if y > target_row.get_height() / 2:
+            target_idx += 1
+
+        ids.remove(dragged_id)
+        ids.insert(target_idx, dragged_id)
+        self._save_playlist_order(ids)
+        self._refresh_contents()
+        return True
+
+    def _save_playlist_order(self, ids):
+        pl_path = os.path.join(PLAYLISTS_DIR, self._selected_playlist)
+        with open(pl_path, "w") as f:
+            f.write("\n".join(ids) + ("\n" if ids else ""))
+
 
 ########################################
 # WINDOW
@@ -601,6 +713,7 @@ class WallGui(Gtk.ApplicationWindow):
         self._debounce_id   = None
         self._desc_expanded = False
         self._type_filter   = ""
+        self._favorites     = set(load_playlist_ids(FAVORITES_NAME))
 
         self._build_ui()
         self._populate_list()
@@ -867,6 +980,12 @@ class WallGui(Gtk.ApplicationWindow):
         self.apply_btn.connect("clicked", self._on_apply)
         action.append(self.apply_btn)
 
+        self._fav_btn = Gtk.Button(label="☆")
+        self._fav_btn.set_tooltip_text("Add to Favorites")
+        self._fav_btn.set_sensitive(False)
+        self._fav_btn.connect("clicked", self._on_toggle_favorite)
+        action.append(self._fav_btn)
+
         # Secondary actions in overflow popover
         overflow_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
         overflow_box.set_margin_top(4)
@@ -948,6 +1067,11 @@ class WallGui(Gtk.ApplicationWindow):
                 dot.add_css_class("accent")
                 box.append(dot)
 
+            if wall["id"] in self._favorites:
+                star = Gtk.Label(label="★")
+                star.add_css_class("accent")
+                box.append(star)
+
             text_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
             text_box.set_hexpand(True)
 
@@ -1027,6 +1151,11 @@ class WallGui(Gtk.ApplicationWindow):
         self.share_btn.set_sensitive(True)
         self.open_btn.set_sensitive(True)
         self.playlist_btn.set_sensitive(True)
+        self._fav_btn.set_sensitive(True)
+        self._fav_btn.set_label("★" if wall["id"] in self._favorites else "☆")
+        self._fav_btn.set_tooltip_text(
+            "Remove from Favorites" if wall["id"] in self._favorites else "Add to Favorites"
+        )
 
         # Reset panel to cached data while full info loads
         self.title_label.set_text(wall["title"])
@@ -1290,8 +1419,22 @@ class WallGui(Gtk.ApplicationWindow):
             self.desc_label.set_ellipsize(Pango.EllipsizeMode.END)
             self._show_more_btn.set_label("Show more")
 
-    def _on_refresh(self, _btn):
+    def _on_toggle_favorite(self, _btn):
+        if not self.selected_id:
+            return
+        now_fav = toggle_favorite(self.selected_id)
+        self._favorites = set(load_playlist_ids(FAVORITES_NAME))
+        self._fav_btn.set_label("★" if now_fav else "☆")
+        self._fav_btn.set_tooltip_text(
+            "Remove from Favorites" if now_fav else "Add to Favorites"
+        )
+        # Refresh list to update badges
+        self._reload_list()
+
+    def _reload_list(self):
+        """Repopulate the list without losing the current selection."""
         self.wallpapers = load_wallpapers()
+        self._favorites = set(load_playlist_ids(FAVORITES_NAME))
         child = self.listbox.get_first_child()
         while child:
             nxt = child.get_next_sibling()
@@ -1299,6 +1442,9 @@ class WallGui(Gtk.ApplicationWindow):
             child = nxt
         self._populate_list()
         self._update_count()
+
+    def _on_refresh(self, _btn):
+        self._reload_list()
         self._refresh_status()
 
     def _refresh_status(self):

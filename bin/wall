@@ -32,6 +32,7 @@ PLAYLISTS_DIR="$HOME/.config/wall/playlists"
 FPS=60
 SCALING=fill
 AUDIO=0
+VOLUME=15
 
 mkdir -p "$STATE_DIR" "$MON_DIR"
 
@@ -169,7 +170,11 @@ if [ -f "$PROP_FILE" ]; then
 fi
 
 local AUDIO_FLAGS=()
-[ "${AUDIO:-0}" = "0" ] && AUDIO_FLAGS=(--silent)
+if [ "${AUDIO:-0}" = "0" ]; then
+    AUDIO_FLAGS=(--silent)
+else
+    AUDIO_FLAGS=(--volume "${VOLUME:-15}")
+fi
 
 linux-wallpaperengine \
     "$DIR" \
@@ -1133,16 +1138,41 @@ prop)
 ;;
 
 version)
+    _SHOW_ALL=false
+    for _arg in "${@:2}"; do
+        case "$_arg" in --all) _SHOW_ALL=true ;; esac
+    done
+
     echo "wall $VERSION"
+
+    _CHANGELOG_URL="https://raw.githubusercontent.com/bbetter/wall/main/CHANGELOG.md"
+    _CHANGELOG=$(curl -sf "$_CHANGELOG_URL" 2>/dev/null)
+    if [ -z "$_CHANGELOG" ]; then
+        echo "(could not fetch release notes)"
+        exit 0
+    fi
+
+    echo ""
+    if [ "$_SHOW_ALL" = true ]; then
+        echo "$_CHANGELOG" | sed 's/^# Changelog//' | sed '/^[[:space:]]*$/{ N; /^\n[[:space:]]*$/d; }'
+    else
+        echo "$_CHANGELOG" \
+            | sed -n "/^## v${VERSION}$/,/^## v/{ /^## v${VERSION}$/d; /^## v[0-9]/d; p; }" \
+            | sed '/^[[:space:]]*$/{ 1d; }' \
+            | sed -e 's/^- /  • /'
+    fi
 ;;
 
 update)
     _FORCE=false
+    _WHATSNEW=false
     for _arg in "${@:2}"; do
         case "$_arg" in
             --force|--fresh) _FORCE=true ;;
+            --whatsnew)      _WHATSNEW=true ;;
         esac
     done
+
     echo "Checking for updates..."
     LATEST_TAG=$(curl -s "https://api.github.com/repos/bbetter/wall/releases/latest" \
         | jq -r '.tag_name // empty')
@@ -1151,10 +1181,36 @@ update)
         exit 1
     fi
     LATEST_VER="${LATEST_TAG#v}"
+
+    _print_whats_new() {
+        local _ver="$1" _tag="$2"
+        local _cl
+        _cl=$(curl -sf "https://raw.githubusercontent.com/bbetter/wall/$_tag/CHANGELOG.md" 2>/dev/null)
+        if [ -n "$_cl" ]; then
+            echo ""
+            echo "What's new in v${_ver}:"
+            echo "$_cl" \
+                | sed -n "/^## v${_ver}$/,/^## v/{ /^## v${_ver}$/d; /^## v[0-9]/d; p; }" \
+                | sed '/^[[:space:]]*$/{ 1d; }' \
+                | sed 's/^- /  • /'
+        fi
+    }
+
+    if [ "$_WHATSNEW" = true ]; then
+        if [ "$LATEST_VER" = "$VERSION" ]; then
+            echo "You are already on the latest version (v$VERSION)."
+        else
+            echo "v$VERSION → v$LATEST_VER available"
+            _print_whats_new "$LATEST_VER" "$LATEST_TAG"
+        fi
+        exit 0
+    fi
+
     if [ "$_FORCE" = false ] && [ "$LATEST_VER" = "$VERSION" ]; then
         echo "Already up to date (v$VERSION)"
         exit 0
     fi
+
     echo "Updating v$VERSION -> $LATEST_TAG..."
     _REPO_RAW="https://raw.githubusercontent.com/bbetter/wall/$LATEST_TAG"
     for BIN in wall wall-gui wall-picker; do
@@ -1163,7 +1219,10 @@ update)
         mv "$HOME/.local/bin/$BIN.tmp" "$HOME/.local/bin/$BIN"
         echo "  Updated $BIN"
     done
-    echo "Done. Run 'wall version' to confirm."
+
+    _print_whats_new "$LATEST_VER" "$LATEST_TAG"
+    echo ""
+    echo "Done. Now on v$LATEST_VER."
     exit 0
 ;;
 
@@ -1208,12 +1267,19 @@ set)
                     ;;
             esac
             ;;
+        volume)
+            if ! [[ "$VAL" =~ ^[0-9]+$ ]] || [ "$VAL" -gt 100 ]; then
+                echo "Error: volume must be an integer between 0 and 100"
+                exit 1
+            fi
+            ;;
         *)
             echo "Usage: wall set <setting> <value>"
             echo ""
             echo "  wall set fps <integer>                   (e.g. 30, 60)"
             echo "  wall set scaling <fill|fit|stretch|default>"
             echo "  wall set audio <0|1>                     (0=silent, 1=enabled)"
+            echo "  wall set volume <0-100>"
             exit 1
             ;;
     esac
@@ -1428,6 +1494,8 @@ echo "  wall list"
 echo "  wall stop [monitor]"
 echo "  wall set fps <integer>"
 echo "  wall set scaling <fill|fit|stretch|default>"
+echo "  wall set audio <0|1>"
+echo "  wall set volume <0-100>"
 echo "  wall log"
 echo "  wall cache [clear|rebuild]"
 echo "  wall exclude <id>"
@@ -1435,8 +1503,8 @@ echo "  wall include <id>"
 echo "  wall playlist create/add/remove/delete/list/show <name>"
 echo "  wall playlist play <name> [seconds] [monitor]"
 echo "  wall playlist shuffle <name> [seconds] [monitor]"
-echo "  wall update [--force]"
-echo "  wall version"
+echo "  wall update [--force] [--whatsnew]"
+echo "  wall version [--all]"
 ;;
 
 esac
