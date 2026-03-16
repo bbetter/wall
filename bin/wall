@@ -1,10 +1,28 @@
 #!/usr/bin/env bash
 
 ########################################
+# wall — Linux wallpaper manager
+#
+# Manages Wallpaper Engine wallpapers via linux-wallpaperengine.
+# Supports per-monitor wallpaper assignment, cycling, shuffling,
+# named playlists, property overrides, and a background daemon
+# that processes commands and drives timed wallpaper changes.
+#
+# Key concepts:
+#   Config file  — ~/.config/wall/config (sourced for FPS, scaling, audio, etc.)
+#   State dir    — ~/.cache/wall (daemon PID, per-monitor subdirs, cache, log)
+#   Daemon IPC   — commands are written to a "cmd" file; the daemon loop polls it
+#   Per-monitor  — each monitor gets its own state: current wallpaper, mode, index,
+#                  shuffle order, playlist name, and next-tick timestamp
+#
+# Dependencies: linux-wallpaperengine, jq, ffprobe, curl
+########################################
+
+########################################
 # CONFIG
 ########################################
 
-VERSION="0.9.5"
+VERSION="1.0.0"
 
 CONFIG_FILE="$HOME/.config/wall/config"
 
@@ -26,7 +44,11 @@ PROPS_DIR="$HOME/.config/wall/props"
 EXCLUDED_FILE="$HOME/.config/wall/excluded"
 PLAYLISTS_DIR="$HOME/.config/wall/playlists"
 
-# Defaults — sourcing config after so config values win
+########################################
+# DEFAULTS
+########################################
+
+# Defaults are set BEFORE sourcing the config so that user values win.
 FPS=60
 SCALING=fill
 AUDIO=0
@@ -39,17 +61,19 @@ FULLSCREEN_PAUSE=0
 mkdir -p "$STATE_DIR" "$MON_DIR"
 
 ########################################
-# LOG
+# UTILS
 ########################################
 
+# Append a timestamped message to the log file.
 log() {
     echo "$(date '+%H:%M:%S') $*" >> "$LOGFILE"
 }
 
 ########################################
-# DAEMON CHECK
+# DAEMON CONTROL
 ########################################
 
+# Check whether the daemon process is alive.
 is_running() {
     [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null
 }
@@ -58,6 +82,7 @@ is_running() {
 # WAIT FOR STEAM
 ########################################
 
+# Block until the Steam workshop directory is accessible.
 wait_for_steam() {
 
 while true; do
@@ -76,6 +101,8 @@ done
 # MONITOR DETECT
 ########################################
 
+# Detect connected monitors via hyprctl, kscreen-doctor, or xrandr.
+# Falls back to "*" (all monitors) if no tool is available.
 get_monitors() {
 
 if command -v hyprctl >/dev/null; then
@@ -101,6 +128,7 @@ echo "*"
 # MONITOR STATE DIR
 ########################################
 
+# Return (and ensure) the per-monitor state directory path.
 mon_state_dir() {
     local d="$MON_DIR/$1"
     mkdir -p "$d"
@@ -111,6 +139,7 @@ mon_state_dir() {
 # STOP
 ########################################
 
+# Kill the wallpaper process on a single monitor and clean up its PID file.
 stop_monitor() {
 
 local MON="$1"
@@ -127,6 +156,7 @@ fi
 
 }
 
+# Stop wallpaper processes on all monitors, plus a pkill safety net.
 stop_wallpapers() {
 
 log "Stopping all wallpapers"
@@ -143,9 +173,12 @@ pkill -f linux-wallpaperengine 2>/dev/null
 }
 
 ########################################
-# LAUNCH ON MONITOR
+# LAUNCH
 ########################################
 
+# Launch a wallpaper on a specific monitor via linux-wallpaperengine.
+# Stops any existing wallpaper on that monitor first, loads per-wallpaper
+# property overrides, and records the PID and current wallpaper ID in state.
 launch_on_monitor() {
 
 local DIR="$1"
@@ -198,9 +231,10 @@ echo "$ID" > "$D/current"
 }
 
 ########################################
-# METADATA CACHE
+# CACHE
 ########################################
 
+# Check if the cache file exists and is newer than all project.json files.
 cache_valid() {
 
 [ -f "$CACHE_FILE" ] || return 1
@@ -209,6 +243,9 @@ cache_valid() {
 
 }
 
+# Scan the workshop directory and build a TSV cache of wallpaper metadata.
+# Format: ID\tTITLE\tTAGS\tTYPE\tDESC
+# Only video, scene, web, and application types are included.
 build_list_cache() {
 
 log "Building list cache"
@@ -244,6 +281,7 @@ log "List cache built ($CACHE_COUNT entries)"
 
 }
 
+# Rebuild the cache if it is stale or missing.
 ensure_cache() {
 
 cache_valid || build_list_cache
@@ -254,6 +292,7 @@ cache_valid || build_list_cache
 # LOAD WALL LIST
 ########################################
 
+# Load all non-excluded wallpaper paths into the WALLS array. Sets TOTAL.
 load_walls() {
 
 ensure_cache
@@ -272,9 +311,11 @@ log "Loaded wallpapers: $TOTAL"
 }
 
 ########################################
-# LOAD PLAYLIST WALLS
+# PLAYLIST
 ########################################
 
+# Load wallpaper paths for a named playlist into WALLS. Sets TOTAL.
+# Skips IDs that are not in the cache (e.g. unsubscribed wallpapers).
 load_playlist_walls() {
 
 local NAME="$1"
@@ -313,6 +354,9 @@ log "Playlist '$NAME' loaded: $TOTAL walls"
 # VALIDATE INDEX
 ########################################
 
+# Ensure the stored index for a monitor matches its current wallpaper ID.
+# If the list was re-sorted or rebuilt, the saved index may point to a
+# different wallpaper; this searches for the correct one and updates state.
 validate_index_for() {
 
 local MON="$1"
@@ -346,9 +390,11 @@ echo "$IDX"
 }
 
 ########################################
-# SCHEDULE NEXT TICK
+# TICK
 ########################################
 
+# Write the next-tick timestamp for a monitor if it is in a timed mode.
+# The daemon loop compares this timestamp to decide when to advance.
 schedule_next_tick() {
 
 local MON="$1"
@@ -371,6 +417,7 @@ fi
 # SHUFFLE
 ########################################
 
+# Generate a randomised index sequence for a monitor's shuffle order.
 build_shuffle_for() {
 
 local MON="$1"
@@ -384,9 +431,12 @@ log "Shuffle list built for $MON ($TOTAL entries)"
 }
 
 ########################################
-# NEXT
+# NEXT / PREV
 ########################################
 
+# Advance to the next wallpaper on a monitor.
+# In shuffle/playlist_shuffle modes, walks the shuffle index list and
+# rebuilds it when exhausted. In cycle/playlist modes, wraps sequentially.
 next_wallpaper_for() {
 
 local MON="$1"
@@ -415,10 +465,13 @@ if [ "$MODE" = "shuffle" ] || [ "$MODE" = "playlist_shuffle" ]; then
     local -a SHUFFLE_IDX
     mapfile -t SHUFFLE_IDX < "$D/shuffle" 2>/dev/null
 
+    # POS tracks position within the shuffle index list, not the wall list directly.
+    # SHUFFLE_IDX[POS] gives the actual index into the WALLS array.
     local POS
     POS=$(cat "$D/index" 2>/dev/null || echo -1)
     POS=$(( POS + 1 ))
 
+    # Rebuild shuffle order when all entries have been shown
     if [ "$POS" -ge "${#SHUFFLE_IDX[@]}" ]; then
         build_shuffle_for "$MON"
         mapfile -t SHUFFLE_IDX < "$D/shuffle"
@@ -434,6 +487,7 @@ else
     local IDX
     IDX=$(validate_index_for "$MON")
     log "Current index for $MON: $IDX"
+    # Wrap around to 0 when reaching the end of the list
     IDX=$(( (IDX + 1) % TOTAL ))
     log "Next index for $MON: $IDX"
     echo "$IDX" > "$D/index"
@@ -445,10 +499,9 @@ schedule_next_tick "$MON"
 
 }
 
-########################################
-# PREV
-########################################
-
+# Go to the previous wallpaper on a monitor (reverse of next).
+# In shuffle modes, decrements the shuffle position; in sequential modes,
+# wraps backwards using modular arithmetic to avoid negative indices.
 prev_wallpaper_for() {
 
 local MON="$1"
@@ -491,6 +544,7 @@ else
     local IDX
     IDX=$(validate_index_for "$MON")
     log "Current index for $MON: $IDX"
+    # Add TOTAL before subtracting to avoid negative modulo
     IDX=$(( (IDX - 1 + TOTAL) % TOTAL ))
     log "Prev index for $MON: $IDX"
     echo "$IDX" > "$D/index"
@@ -506,6 +560,7 @@ schedule_next_tick "$MON"
 # RANDOM
 ########################################
 
+# Pick a random wallpaper for a monitor. Resets mode to idle (one-shot).
 random_wallpaper_for() {
 
 local MON="$1"
@@ -530,9 +585,10 @@ launch_on_monitor "${WALLS[$IDX]}" "$MON"
 }
 
 ########################################
-# START CYCLE
+# CYCLE
 ########################################
 
+# Begin sequential cycling on a monitor at the configured interval.
 start_cycle_for() {
 
 local MON="$1"
@@ -554,6 +610,8 @@ next_wallpaper_for "$MON"
 # START SHUFFLE
 ########################################
 
+# Begin shuffle mode on a monitor: build a random index list and start advancing.
+# Index starts at -1 so the first next_wallpaper_for call lands on position 0.
 start_shuffle_for() {
 
 local MON="$1"
@@ -580,6 +638,7 @@ next_wallpaper_for "$MON"
 # START PLAYLIST
 ########################################
 
+# Begin ordered playlist playback on a monitor. Reads the playlist name from state.
 start_playlist_for() {
 
 local MON="$1"
@@ -615,6 +674,7 @@ next_wallpaper_for "$MON"
 # START PLAYLIST SHUFFLE
 ########################################
 
+# Begin shuffled playlist playback on a monitor. Reads the playlist name from state.
 start_playlist_shuffle_for() {
 
 local MON="$1"
@@ -650,6 +710,7 @@ next_wallpaper_for "$MON"
 # RUN BY ID
 ########################################
 
+# Launch a specific wallpaper by workshop ID. Sets mode to idle (no cycling).
 run_by_id() {
 
 local ID="$1"
@@ -692,6 +753,8 @@ done
 # DAEMON LOOP
 ########################################
 
+# Main daemon loop: saves PID, restores wallpapers from state, then polls
+# for commands (via CMD_FILE) and tick expirations every 0.5 seconds.
 daemon_loop() {
 
 echo $$ > "$PIDFILE"
@@ -769,6 +832,7 @@ while true; do
                 run_by_id $MON_ARG ;;
             playlist_play)
                 # MON_ARG = "PLAYLIST_NAME" or "PLAYLIST_NAME MONITOR"
+                # Split on first space; if no space, PL_MON equals PL_NAME (reset to "")
                 local PL_NAME PL_MON
                 PL_NAME="${MON_ARG%% *}"
                 PL_MON="${MON_ARG#* }"
@@ -846,6 +910,8 @@ done
 # SEND COMMAND
 ########################################
 
+# Write a command to the daemon's CMD_FILE for async processing.
+# Starts the daemon automatically if it is not running.
 send_cmd() {
 
 local CMD="$1"
@@ -863,10 +929,12 @@ printf "%s\n" "$CMD${MON:+ $MON}" > "$CMD_FILE"
 
 }
 
+# Convenience wrapper: send a playlist_play command with name and optional monitor.
 send_playlist_play_cmd() {
     send_cmd "playlist_play" "$1${2:+ $2}"
 }
 
+# Convenience wrapper: send a playlist_shuffle command with name and optional monitor.
 send_playlist_shuffle_cmd() {
     send_cmd "playlist_shuffle" "$1${2:+ $2}"
 }

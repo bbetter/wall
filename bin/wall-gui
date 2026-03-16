@@ -1,4 +1,28 @@
 #!/usr/bin/env python3
+"""wall-gui -- GTK4 graphical frontend for the wall wallpaper manager.
+
+Architecture:
+    WallGui           Main application window. Left pane: searchable, filterable
+                      wallpaper list. Right pane: detail panel with thumbnail,
+                      metadata, properties, and actions. Info loading is async
+                      (threaded) with GLib.idle_add for thread-safe UI updates.
+    PlaylistWindow    Two-pane modal for managing named playlists with drag-and-drop
+                      reorder (uses GObject.TYPE_STRING for DnD value passing).
+    SettingsWindow    Modal for global settings (FPS, scaling, audio, volume,
+                      fullscreen-pause). Writes to ~/.config/wall/config and
+                      reloads the daemon on apply.
+
+Data flows:
+    - All CLI interaction goes through wall_cmd() which shells out to `wall`.
+    - Wallpaper list is loaded once at startup via load_wallpapers(); the user
+      can refresh manually.
+    - Selecting a wallpaper triggers a debounced async load_info() call that
+      populates the detail panel, including properties and video metadata.
+    - Property changes are staged in memory and persisted on Apply via
+      `wall prop set`.
+    - Favorites are a special protected playlist; toggling updates the file
+      directly and refreshes the list to show/hide star badges.
+"""
 
 import gi
 gi.require_version('Gtk', '4.0')
@@ -50,6 +74,7 @@ def bbcode_to_pango(text):
 ########################################
 
 def get_wall_bin():
+    """Resolve the path to the wall CLI binary."""
     return shutil.which("wall") or os.path.expanduser("~/.local/bin/wall")
 
 
@@ -138,6 +163,7 @@ FAVORITES_NAME = "Favorites"
 
 
 def is_in_favorites(wall_id):
+    """Check whether a wallpaper is in the Favorites playlist."""
     return wall_id in set(load_playlist_ids(FAVORITES_NAME))
 
 
@@ -176,6 +202,7 @@ def load_playlist_ids(name):
 
 
 def playlist_cmd(subcmd, *args):
+    """Run a `wall playlist <subcmd> ...` command."""
     wall_cmd("playlist", subcmd, *args)
 
 
@@ -184,6 +211,11 @@ def playlist_cmd(subcmd, *args):
 ########################################
 
 class SettingsWindow(Gtk.Window):
+    """Modal window for editing global settings (FPS, scaling, audio, volume,
+    fullscreen-pause). Writes changes to the config file and reloads the daemon.
+    """
+
+    # --- Init ---
 
     def __init__(self, parent):
         super().__init__(title="Settings", transient_for=parent, modal=True)
@@ -321,10 +353,14 @@ class SettingsWindow(Gtk.Window):
         apply_btn.connect("clicked", self._on_apply)
         box.append(apply_btn)
 
+    # --- Callbacks ---
+
     def _on_silent_toggled(self, sw, _param):
+        """Disable volume slider when silent mode is active."""
         self._vol_scale.set_sensitive(not sw.get_active())
 
     def _on_apply(self, _btn):
+        """Persist all settings to the config file and reload the daemon."""
         updates = {
             "FPS":              str(int(self._fps_spin.get_value())),
             "SCALING":          self._scaling_opts[self._scl_drop.get_selected()],
@@ -355,6 +391,12 @@ class SettingsWindow(Gtk.Window):
 ########################################
 
 class PlaylistWindow(Gtk.Window):
+    """Two-pane playlist manager. Left: playlist list. Right: playlist contents
+    with drag-and-drop reordering. Toolbar provides monitor/interval selectors
+    and Play/Shuffle buttons.
+    """
+
+    # --- Init ---
 
     def __init__(self, parent, all_walls):
         super().__init__(title="Playlists", transient_for=parent)
@@ -365,7 +407,10 @@ class PlaylistWindow(Gtk.Window):
         self._build_ui()
         self._refresh_playlists()
 
+    # --- UI building ---
+
     def _build_ui(self):
+        """Construct the toolbar, paned layout, playlist list, and contents list."""
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self.set_child(root)
 
@@ -481,7 +526,10 @@ class PlaylistWindow(Gtk.Window):
         paned.set_end_child(right_box)
         paned.set_shrink_end_child(False)
 
+    # --- List population ---
+
     def _refresh_playlists(self):
+        """Reload the playlist list and clear the contents pane."""
         child = self._pl_listbox.get_first_child()
         while child:
             nxt = child.get_next_sibling()
@@ -508,6 +556,7 @@ class PlaylistWindow(Gtk.Window):
         self._refresh_contents()
 
     def _refresh_contents(self):
+        """Reload the right-pane contents for the currently selected playlist."""
         child = self._content_listbox.get_first_child()
         while child:
             nxt = child.get_next_sibling()
@@ -528,7 +577,10 @@ class PlaylistWindow(Gtk.Window):
         for wall_id in load_playlist_ids(self._selected_playlist):
             self._content_listbox.append(self._make_content_row(wall_id))
 
+    # --- Selection callbacks ---
+
     def _on_pl_selected(self, _lb, row):
+        """Handle playlist selection: enable/disable buttons, refresh contents."""
         if row is None:
             self._selected_playlist = None
             self._delete_btn.set_sensitive(False)
@@ -544,7 +596,10 @@ class PlaylistWindow(Gtk.Window):
         self._shuffle_btn.set_sensitive(has_entries)
         self._refresh_contents()
 
+    # --- Actions ---
+
     def _on_new_playlist(self, _btn):
+        """Show a dialog to create a new playlist."""
         win = Gtk.Window(title="New Playlist", transient_for=self, modal=True)
         win.set_default_size(320, 120)
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
@@ -577,6 +632,7 @@ class PlaylistWindow(Gtk.Window):
         win.present()
 
     def _on_delete_playlist(self, _btn):
+        """Confirm and delete the selected playlist. Favorites cannot be deleted."""
         if not self._selected_playlist or self._selected_playlist == FAVORITES_NAME:
             return
         confirm = Gtk.Window(title="Delete Playlist", transient_for=self, modal=True)
@@ -608,6 +664,7 @@ class PlaylistWindow(Gtk.Window):
         confirm.present()
 
     def _on_remove_entry(self, _btn):
+        """Remove selected entries from the current playlist."""
         if not self._selected_playlist:
             return
         selected_rows = self._content_listbox.get_selected_rows()
@@ -625,6 +682,7 @@ class PlaylistWindow(Gtk.Window):
             child = child.get_next_sibling()
 
     def _on_play(self, _btn):
+        """Start ordered playlist playback on the selected monitor."""
         if not self._selected_playlist:
             return
         item = self._mon_drop.get_selected_item()
@@ -636,6 +694,7 @@ class PlaylistWindow(Gtk.Window):
         wall_cmd(*args)
 
     def _on_shuffle(self, _btn):
+        """Start shuffled playlist playback on the selected monitor."""
         if not self._selected_playlist:
             return
         item = self._mon_drop.get_selected_item()
@@ -646,7 +705,10 @@ class PlaylistWindow(Gtk.Window):
             args.append(monitor)
         wall_cmd(*args)
 
+    # --- Drag and drop ---
+
     def _make_content_row(self, wall_id):
+        """Build a ListBoxRow for a playlist entry, with a drag handle."""
         row = Gtk.ListBoxRow()
         row.wall_id = wall_id
         title = self.all_walls.get(wall_id, "[unknown]")
@@ -688,11 +750,15 @@ class PlaylistWindow(Gtk.Window):
         return row
 
     def _on_drag_prepare(self, _src, _x, _y, row):
+        """Provide the dragged row's wall_id as a string content value."""
         v = GObject.Value(GObject.TYPE_STRING)
         v.set_string(row.wall_id)
         return Gdk.ContentProvider.new_for_value(v)
 
     def _on_drop(self, _tgt, value, _x, y, target_row):
+        """Reorder playlist entries on drop. Insert before or after target row
+        depending on whether the drop point is in the upper or lower half.
+        """
         dragged_id = value
         if dragged_id == target_row.wall_id or not self._selected_playlist:
             return False
@@ -722,6 +788,7 @@ class PlaylistWindow(Gtk.Window):
         return True
 
     def _save_playlist_order(self, ids):
+        """Write the reordered ID list back to the playlist file."""
         pl_path = os.path.join(PLAYLISTS_DIR, self._selected_playlist)
         with open(pl_path, "w") as f:
             f.write("\n".join(ids) + ("\n" if ids else ""))
@@ -732,6 +799,13 @@ class PlaylistWindow(Gtk.Window):
 ########################################
 
 class WallGui(Gtk.ApplicationWindow):
+    """Main application window. Displays a searchable, filterable list of
+    wallpapers on the left and a detail panel with thumbnail, metadata,
+    properties, and action buttons on the right. Info is loaded asynchronously
+    in a background thread; UI updates are dispatched via GLib.idle_add.
+    """
+
+    # --- Init ---
 
     def __init__(self, app):
         super().__init__(application=app, title="wall-gui")
@@ -754,11 +828,12 @@ class WallGui(Gtk.ApplicationWindow):
         GLib.timeout_add(3000, self._refresh_status)
         self._setup_keyboard()
 
-    # --------------------------------------------------
-    # UI
-    # --------------------------------------------------
+    # --- UI building ---
 
     def _build_ui(self):
+        """Construct the full window layout: search bar, filter chips, paned
+        list/detail view, status bar, and action buttons.
+        """
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self.set_child(root)
 
@@ -1055,7 +1130,10 @@ class WallGui(Gtk.ApplicationWindow):
 
         self.search.grab_focus()
 
+    # --- List population ---
+
     def _populate_list(self):
+        """Fill the left-pane ListBox with wallpaper rows, or show an empty state."""
         if not self.wallpapers:
             empty = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
             empty.set_valign(Gtk.Align.CENTER)
@@ -1133,11 +1211,10 @@ class WallGui(Gtk.ApplicationWindow):
             row.set_child(box)
             self.listbox.append(row)
 
-    # --------------------------------------------------
-    # CALLBACKS
-    # --------------------------------------------------
+    # --- Filtering ---
 
     def _matches_filter(self, w):
+        """Return True if a wallpaper dict matches the active type and text filters."""
         if self._type_filter and w["type"].lower() != self._type_filter:
             return False
         query = self.search.get_text().lower()
@@ -1146,15 +1223,18 @@ class WallGui(Gtk.ApplicationWindow):
         return query in w["title"].lower() or query in w["tags"].lower() or query in w["desc"].lower()
 
     def _filter(self, row):
+        """ListBox filter callback."""
         if not hasattr(row, "wall"):
             return True
         return self._matches_filter(row.wall)
 
     def _on_search_changed(self, _entry):
+        """Re-filter and update count when search text changes."""
         self.listbox.invalidate_filter()
         self._update_count()
 
     def _update_count(self):
+        """Update the 'N / total' counter label in the filter bar."""
         count = sum(1 for w in self.wallpapers if self._matches_filter(w))
         total = len(self.wallpapers)
         self._count_label.set_text(
@@ -1162,6 +1242,7 @@ class WallGui(Gtk.ApplicationWindow):
         )
 
     def _on_type_filter(self, btn, typ):
+        """Handle type filter chip click: ensure mutual exclusivity."""
         for t, b in self._type_btns.items():
             if t != typ:
                 b.set_active(False)
@@ -1172,8 +1253,12 @@ class WallGui(Gtk.ApplicationWindow):
         self.listbox.invalidate_filter()
         self._update_count()
 
+    # --- Selection and info loading ---
+
     def _on_selected(self, _listbox, row):
-        """Single click — immediately enable actions, then async-load details."""
+        """Single click -- enable action buttons immediately, then kick off a
+        debounced async info load to populate the detail panel.
+        """
         if row is None or not hasattr(row, "wall"):
             return
         wall = row.wall
@@ -1209,6 +1294,7 @@ class WallGui(Gtk.ApplicationWindow):
         self._debounce_id = GLib.timeout_add(150, self._start_load_info, wall)
 
     def _start_load_info(self, wall):
+        """Spawn a background thread to load full wallpaper info via CLI."""
         self._debounce_id = None
         load_id = wall["id"]
         self._spinner.start()
@@ -1222,6 +1308,10 @@ class WallGui(Gtk.ApplicationWindow):
         return False
 
     def _on_info_loaded(self, load_id, wall, info):
+        """Populate the detail panel with loaded info. Called via GLib.idle_add
+        to ensure thread-safe GTK updates. Discards stale results if the user
+        has already selected a different wallpaper.
+        """
         if load_id != self.selected_id:
             return
         self._spinner.stop()
@@ -1289,6 +1379,7 @@ class WallGui(Gtk.ApplicationWindow):
         self._build_properties_panel(info.get("properties", []), wall["id"])
 
     def _update_preview(self, thumb):
+        """Set the thumbnail preview; uses Gtk.MediaFile for video/gif previews."""
         if self._current_media is not None:
             self._current_media.pause()
             self._current_media = None
@@ -1310,9 +1401,7 @@ class WallGui(Gtk.ApplicationWindow):
         else:
             self.thumbnail.set_filename(thumb)
 
-    # --------------------------------------------------
-    # PROPERTIES PANEL
-    # --------------------------------------------------
+    # --- Properties panel ---
 
     def _build_properties_panel(self, properties, wall_id):
         """Rebuild the properties section for the selected wallpaper."""
@@ -1362,6 +1451,7 @@ class WallGui(Gtk.ApplicationWindow):
                 grid.attach(widget, 1, i, 1, 1)
 
     def _make_prop_widget(self, key, ptype, value, prop):
+        """Create the appropriate GTK widget for a wallpaper property type."""
         if ptype == "bool":
             sw = Gtk.Switch()
             sw.set_active(str(value).lower() in ("true", "1"))
@@ -1429,18 +1519,22 @@ class WallGui(Gtk.ApplicationWindow):
         return None
 
     def _stage(self, key, value):
+        """Stage a property change in memory (persisted on Apply)."""
         self._staged_props[key] = value
 
     def _on_color_set(self, btn, key):
+        """Stage a color property as 'R G B' floats."""
         rgba = btn.get_rgba()
         self._staged_props[key] = f"{rgba.red:.4f} {rgba.green:.4f} {rgba.blue:.4f}"
 
     def _on_combo_changed(self, dropdown, key, values):
+        """Stage a combo property change using the values list."""
         idx = dropdown.get_selected()
         if 0 <= idx < len(values):
             self._staged_props[key] = values[idx]
 
     def _on_toggle_desc(self, _btn):
+        """Toggle between truncated and full description display."""
         self._desc_expanded = not self._desc_expanded
         if self._desc_expanded:
             self.desc_label.set_lines(0)
@@ -1451,7 +1545,10 @@ class WallGui(Gtk.ApplicationWindow):
             self.desc_label.set_ellipsize(Pango.EllipsizeMode.END)
             self._show_more_btn.set_label("Show more")
 
+    # --- Favorites ---
+
     def _on_toggle_favorite(self, _btn):
+        """Add or remove the selected wallpaper from Favorites."""
         if not self.selected_id:
             return
         now_fav = toggle_favorite(self.selected_id)
@@ -1476,10 +1573,16 @@ class WallGui(Gtk.ApplicationWindow):
         self._update_count()
 
     def _on_refresh(self, _btn):
+        """Refresh button callback: reload wallpapers and update status."""
         self._reload_list()
         self._refresh_status()
 
+    # --- Status bar ---
+
     def _refresh_status(self):
+        """Read per-monitor state files and update the bottom status strip.
+        Called on a 3-second GLib timer; returns True to keep the timer alive.
+        """
         mon_dir = os.path.expanduser("~/.cache/wall/monitors")
         parts = []
         if os.path.isdir(mon_dir):
@@ -1508,12 +1611,16 @@ class WallGui(Gtk.ApplicationWindow):
         self._status_label.set_text("  |  ".join(parts) if parts else "No wallpaper active")
         return True
 
+    # --- Keyboard shortcuts ---
+
     def _setup_keyboard(self):
+        """Register keyboard shortcuts: / to focus search, Esc to clear it."""
         ctrl = Gtk.EventControllerKey.new()
         ctrl.connect("key-pressed", self._on_key_pressed)
         self.add_controller(ctrl)
 
     def _on_key_pressed(self, _ctrl, keyval, _keycode, _state):
+        """Handle key-press events for search focus and clear shortcuts."""
         if keyval == Gdk.KEY_Escape:
             if self.search.get_text():
                 self.search.set_text("")
@@ -1524,14 +1631,17 @@ class WallGui(Gtk.ApplicationWindow):
         return False
 
     def _on_settings(self, _btn):
+        """Open the global settings modal."""
         win = SettingsWindow(self)
         win.present()
 
     def _on_playlists(self, _btn):
+        """Open the playlist manager modal."""
         win = PlaylistWindow(self, self.wallpapers)
         win.present()
 
     def _on_add_to_playlist(self, _btn):
+        """Show a picker to add the selected wallpaper to a playlist."""
         if not self.selected_id:
             return
         self._overflow_popover.popdown()
@@ -1606,32 +1716,34 @@ class WallGui(Gtk.ApplicationWindow):
         lb.connect("row-activated", lambda _lb, _row: _do_add(None))
         win.present()
 
-    # --------------------------------------------------
-    # ACTIONS
-    # --------------------------------------------------
+    # --- Actions ---
 
     def _on_activated(self, _listbox, row):
-        """Double-click or Enter — apply immediately."""
+        """Double-click or Enter -- apply the wallpaper immediately."""
         if row is not None:
             self.selected_id = row.wall["id"]
         self._on_apply(None)
 
     def _steam_url(self):
+        """Build a Steam Community workshop URL for the selected wallpaper."""
         return f"steam://url/CommunityFilePage/{self.selected_id}"
 
     def _on_open_steam(self, _btn):
+        """Open the wallpaper's Steam workshop page in the default browser."""
         if not self.selected_id:
             return
         self._overflow_popover.popdown()
         subprocess.Popen(["xdg-open", self._steam_url()])
 
     def _on_share(self, _btn):
+        """Copy the Steam workshop URL to the clipboard."""
         if not self.selected_id:
             return
         self._overflow_popover.popdown()
         Gdk.Display.get_default().get_clipboard().set(self._steam_url())
 
     def _on_apply(self, _btn):
+        """Apply the selected wallpaper: persist staged props, then launch."""
         if not self.selected_id:
             return
         # persist staged property overrides
@@ -1647,10 +1759,13 @@ class WallGui(Gtk.ApplicationWindow):
 ########################################
 
 class App(Gtk.Application):
+    """GTK Application entry point."""
+
     def __init__(self):
         super().__init__(application_id="com.github.bbetter.wall-gui")
 
     def do_activate(self):
+        """Create and present the main window."""
         win = WallGui(self)
         win.present()
 

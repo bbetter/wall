@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.0.0
+- Stable release with fully documented codebase
+- Comprehensive doc comments on every function in `bin/wall` (bash) and every method in `bin/wall-gui` (Python)
+- File headers describing architecture, key concepts, data flows, and dependencies
+- Section dividers grouping related code in both files
+- Inline comments on non-obvious logic (shuffle index math, tick scheduling, playlist mode detection, config loading order)
+- No behaviour changes from v0.9.5
+
 ## v0.9.5
 - Fix: global settings (FPS, scaling, audio, volume, fullscreen pause) were never actually applied — config was sourced before defaults were set, so defaults always won; fixed load order
 - This means all `wall set` changes now take effect properly for the first time
