@@ -41,6 +41,7 @@ LOGFILE="$STATE_DIR/wall.log"
 CYCLE_FILE="$STATE_DIR/cycle"
 CACHE_FILE="$STATE_DIR/list.cache"
 PROPS_DIR="$HOME/.config/wall/props"
+FLAGS_DIR="$HOME/.config/wall/wallflags"
 EXCLUDED_FILE="$HOME/.config/wall/excluded"
 PLAYLISTS_DIR="$HOME/.config/wall/playlists"
 
@@ -51,6 +52,7 @@ PLAYLISTS_DIR="$HOME/.config/wall/playlists"
 # Defaults are set BEFORE sourcing the config so that user values win.
 FPS=60
 SCALING=fill
+CLAMP=border
 AUDIO=0
 VOLUME=15
 FULLSCREEN_PAUSE=0
@@ -204,6 +206,14 @@ if [ -f "$PROP_FILE" ]; then
     done < "$PROP_FILE"
 fi
 
+local WP_FLAGS=()
+local FLAGS_FILE="$FLAGS_DIR/$ID"
+if [ -f "$FLAGS_FILE" ]; then
+    while IFS= read -r _flag; do
+        [ -n "$_flag" ] && WP_FLAGS+=("--$_flag")
+    done < "$FLAGS_FILE"
+fi
+
 local AUDIO_FLAGS=()
 if [ "${AUDIO:-0}" = "0" ]; then
     AUDIO_FLAGS=(--silent)
@@ -220,8 +230,10 @@ linux-wallpaperengine \
     --screen-root "$MON" \
     --scaling "$SCALING" \
     --fps "$FPS" \
+    --clamp "${CLAMP:-border}" \
     "${AUDIO_FLAGS[@]}" \
     "${PAUSE_FLAGS[@]}" \
+    "${WP_FLAGS[@]}" \
     "${PROP_FLAGS[@]}" &
 
 local LAUNCHED_PID=$!
@@ -1367,6 +1379,15 @@ set)
                     ;;
             esac
             ;;
+        clamp)
+            case "$VAL" in
+                border|clamp|repeat) ;;
+                *)
+                    echo "Error: clamp must be one of: border, clamp, repeat"
+                    exit 1
+                    ;;
+            esac
+            ;;
         audio)
             case "$VAL" in
                 0|1) ;;
@@ -1396,6 +1417,7 @@ set)
             echo ""
             echo "  wall set fps <integer>                   (e.g. 30, 60)"
             echo "  wall set scaling <fill|fit|stretch|default>"
+            echo "  wall set clamp <border|clamp|repeat>"
             echo "  wall set audio <0|1>                     (0=silent, 1=enabled)"
             echo "  wall set volume <0-100>"
             echo "  wall set fullscreen_pause <0|1>          (0=no pause, 1=pause)"

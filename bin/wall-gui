@@ -144,9 +144,51 @@ def load_saved_props(wall_id):
     return saved
 
 
+WALLFLAGS_DIR = os.path.expanduser("~/.config/wall/wallflags")
+
+
+def load_wall_flags(wall_id):
+    """Return set of active flag names for a wallpaper (e.g. 'disable-particles')."""
+    path = os.path.join(WALLFLAGS_DIR, wall_id)
+    if not os.path.exists(path):
+        return set()
+    with open(path) as f:
+        return {line.strip() for line in f if line.strip()}
+
+
+def set_wall_flag(wall_id, flag, enabled):
+    """Enable or disable a named per-wallpaper flag, persisted to disk."""
+    os.makedirs(WALLFLAGS_DIR, exist_ok=True)
+    path = os.path.join(WALLFLAGS_DIR, wall_id)
+    flags = load_wall_flags(wall_id)
+    if enabled:
+        flags.add(flag)
+    else:
+        flags.discard(flag)
+    with open(path, "w") as f:
+        for fl in sorted(flags):
+            f.write(fl + "\n")
+
+
+def get_active_monitors_for(wall_id):
+    """Return list of monitors currently showing wall_id."""
+    mon_dir = os.path.expanduser("~/.cache/wall/monitors")
+    mons = []
+    if os.path.isdir(mon_dir):
+        for mon in os.listdir(mon_dir):
+            current_f = os.path.join(mon_dir, mon, "current")
+            try:
+                with open(current_f) as f:
+                    if f.read().strip() == wall_id:
+                        mons.append(mon)
+            except OSError:
+                pass
+    return mons
+
+
 def load_config():
     """Read ~/.config/wall/config into a dict."""
-    conf = {"fps": "60", "scaling": "fill", "audio": "0", "volume": "15", "fullscreen_pause": "0"}
+    conf = {"fps": "60", "scaling": "fill", "clamp": "border", "audio": "0", "volume": "15", "fullscreen_pause": "0"}
     config_file = os.path.expanduser("~/.config/wall/config")
     if os.path.exists(config_file):
         with open(config_file) as f:
@@ -219,7 +261,7 @@ class SettingsWindow(Gtk.Window):
 
     def __init__(self, parent):
         super().__init__(title="Settings", transient_for=parent, modal=True)
-        self.set_default_size(400, 320)
+        self.set_default_size(400, 360)
         self.set_resizable(False)
 
         conf = load_config()
@@ -288,11 +330,31 @@ class SettingsWindow(Gtk.Window):
         scl_hint.add_css_class("dim-label")
         grid.attach(scl_hint, 2, 1, 1, 1)
 
+        # Clamp
+        clp_lbl = Gtk.Label(label="Clamp")
+        clp_lbl.set_halign(Gtk.Align.START)
+        clp_lbl.set_tooltip_text("How texture edges are handled when scaling doesn't fill exactly")
+        grid.attach(clp_lbl, 0, 2, 1, 1)
+
+        self._clamp_opts = ["border", "clamp", "repeat"]
+        clp_model = Gtk.StringList.new(self._clamp_opts)
+        self._clp_drop = Gtk.DropDown(model=clp_model)
+        cur_clamp = conf.get("clamp", "border")
+        if cur_clamp in self._clamp_opts:
+            self._clp_drop.set_selected(self._clamp_opts.index(cur_clamp))
+        self._clp_drop.set_tooltip_text("border: solid edge · clamp: stretch edge pixel · repeat: tile")
+        grid.attach(self._clp_drop, 1, 2, 1, 1)
+
+        clp_hint = Gtk.Label(label="border · clamp · repeat")
+        clp_hint.set_halign(Gtk.Align.START)
+        clp_hint.add_css_class("dim-label")
+        grid.attach(clp_hint, 2, 2, 1, 1)
+
         # Silent
         sil_lbl = Gtk.Label(label="Silent")
         sil_lbl.set_halign(Gtk.Align.START)
         sil_lbl.set_tooltip_text("Mute all wallpaper audio")
-        grid.attach(sil_lbl, 0, 2, 1, 1)
+        grid.attach(sil_lbl, 0, 3, 1, 1)
 
         self._sil_sw = Gtk.Switch()
         self._sil_sw.set_active(conf.get("audio", "0") == "0")
@@ -300,18 +362,18 @@ class SettingsWindow(Gtk.Window):
         self._sil_sw.set_valign(Gtk.Align.CENTER)
         self._sil_sw.set_tooltip_text("Mute all wallpaper audio")
         self._sil_sw.connect("notify::active", self._on_silent_toggled)
-        grid.attach(self._sil_sw, 1, 2, 1, 1)
+        grid.attach(self._sil_sw, 1, 3, 1, 1)
 
         sil_hint = Gtk.Label(label="mute all wallpaper audio")
         sil_hint.set_halign(Gtk.Align.START)
         sil_hint.add_css_class("dim-label")
-        grid.attach(sil_hint, 2, 2, 1, 1)
+        grid.attach(sil_hint, 2, 3, 1, 1)
 
         # Volume
         vol_lbl = Gtk.Label(label="Volume")
         vol_lbl.set_halign(Gtk.Align.START)
         vol_lbl.set_tooltip_text("Playback volume (0–100)")
-        grid.attach(vol_lbl, 0, 3, 1, 1)
+        grid.attach(vol_lbl, 0, 4, 1, 1)
 
         self._vol_scale = Gtk.Scale.new_with_range(
             Gtk.Orientation.HORIZONTAL, 0, 100, 1
@@ -323,30 +385,30 @@ class SettingsWindow(Gtk.Window):
         self._vol_scale.set_size_request(160, -1)
         self._vol_scale.set_tooltip_text("Playback volume (0–100)")
         self._vol_scale.set_sensitive(not self._sil_sw.get_active())
-        grid.attach(self._vol_scale, 1, 3, 1, 1)
+        grid.attach(self._vol_scale, 1, 4, 1, 1)
 
         vol_hint = Gtk.Label(label="0–100")
         vol_hint.set_halign(Gtk.Align.START)
         vol_hint.add_css_class("dim-label")
-        grid.attach(vol_hint, 2, 3, 1, 1)
+        grid.attach(vol_hint, 2, 4, 1, 1)
 
         # Fullscreen pause
         fsp_lbl = Gtk.Label(label="Pause on fullscreen")
         fsp_lbl.set_halign(Gtk.Align.START)
         fsp_lbl.set_tooltip_text("Pause wallpapers when a fullscreen app is open")
-        grid.attach(fsp_lbl, 0, 4, 1, 1)
+        grid.attach(fsp_lbl, 0, 5, 1, 1)
 
         self._fsp_sw = Gtk.Switch()
         self._fsp_sw.set_active(conf.get("fullscreen_pause", "0") == "1")
         self._fsp_sw.set_halign(Gtk.Align.START)
         self._fsp_sw.set_valign(Gtk.Align.CENTER)
         self._fsp_sw.set_tooltip_text("Pause wallpapers when a fullscreen app is open")
-        grid.attach(self._fsp_sw, 1, 4, 1, 1)
+        grid.attach(self._fsp_sw, 1, 5, 1, 1)
 
         fsp_hint = Gtk.Label(label="on any monitor")
         fsp_hint.set_halign(Gtk.Align.START)
         fsp_hint.add_css_class("dim-label")
-        grid.attach(fsp_hint, 2, 4, 1, 1)
+        grid.attach(fsp_hint, 2, 5, 1, 1)
 
         apply_btn = Gtk.Button(label="Apply")
         apply_btn.add_css_class("suggested-action")
@@ -364,6 +426,7 @@ class SettingsWindow(Gtk.Window):
         updates = {
             "FPS":              str(int(self._fps_spin.get_value())),
             "SCALING":          self._scaling_opts[self._scl_drop.get_selected()],
+            "CLAMP":            self._clamp_opts[self._clp_drop.get_selected()],
             "AUDIO":            "0" if self._sil_sw.get_active() else "1",
             "VOLUME":           str(int(self._vol_scale.get_value())),
             "FULLSCREEN_PAUSE": "1" if self._fsp_sw.get_active() else "0",
@@ -820,6 +883,7 @@ class WallGui(Gtk.ApplicationWindow):
         self._desc_expanded = False
         self._type_filter   = ""
         self._favorites     = set(load_playlist_ids(FAVORITES_NAME))
+        self._flag_checks   = {}
 
         self._build_ui()
         self._populate_list()
@@ -1067,6 +1131,29 @@ class WallGui(Gtk.ApplicationWindow):
         self._props_box.set_visible(False)
         right.append(self._props_box)
 
+        # per-wallpaper flags section (hidden until a wallpaper is selected)
+        self._flags_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        self._flags_box.set_visible(False)
+        right.append(self._flags_box)
+
+        flags_sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+        self._flags_box.append(flags_sep)
+
+        flags_header = Gtk.Label(label="Wallpaper Flags")
+        flags_header.set_halign(Gtk.Align.START)
+        flags_header.add_css_class("heading")
+        self._flags_box.append(flags_header)
+
+        for flag, label in [
+            ("disable-particles", "Disable particles"),
+            ("disable-parallax",  "Disable parallax"),
+            ("disable-mouse",     "Disable mouse interaction"),
+        ]:
+            cb = Gtk.CheckButton(label=label)
+            cb.connect("toggled", self._on_flag_toggled, flag)
+            self._flags_box.append(cb)
+            self._flag_checks[flag] = cb
+
         spacer = Gtk.Box()
         spacer.set_vexpand(True)
         right.append(spacer)
@@ -1273,6 +1360,14 @@ class WallGui(Gtk.ApplicationWindow):
         self._fav_btn.set_tooltip_text(
             "Remove from Favorites" if wall["id"] in self._favorites else "Add to Favorites"
         )
+
+        # Sync per-wallpaper flag checkboxes (block signals to avoid re-entrancy)
+        active_flags = load_wall_flags(wall["id"])
+        for flag, cb in self._flag_checks.items():
+            cb.handler_block_by_func(self._on_flag_toggled)
+            cb.set_active(flag in active_flags)
+            cb.handler_unblock_by_func(self._on_flag_toggled)
+        self._flags_box.set_visible(True)
 
         # Reset panel to cached data while full info loads
         self.title_label.set_text(wall["title"])
@@ -1544,6 +1639,16 @@ class WallGui(Gtk.ApplicationWindow):
             self.desc_label.set_lines(4)
             self.desc_label.set_ellipsize(Pango.EllipsizeMode.END)
             self._show_more_btn.set_label("Show more")
+
+    # --- Per-wallpaper flags ---
+
+    def _on_flag_toggled(self, btn, flag):
+        """Persist flag change and re-launch wallpaper on active monitors."""
+        if not self.selected_id:
+            return
+        set_wall_flag(self.selected_id, flag, btn.get_active())
+        for mon in get_active_monitors_for(self.selected_id):
+            wall_cmd(self.selected_id, mon)
 
     # --- Favorites ---
 
