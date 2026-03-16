@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.0.3
+- Fix: wall-gui startup blocked the UI while loading wallpapers, monitors, and favorites; data is now fetched in a background thread with a spinner shown until ready
+- Fix: get_wall_bin() now prefers ~/.local/bin/wall explicitly to avoid picking up the system wall utility (util-linux) when launched from Hyprland's exec environment
+
 ## v1.0.2
 - Fix: wall-gui failed to start due to D-Bus registration timeout; removed application_id from Gtk.Application to bypass D-Bus registration
 

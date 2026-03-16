@@ -74,8 +74,16 @@ def bbcode_to_pango(text):
 ########################################
 
 def get_wall_bin():
-    """Resolve the path to the wall CLI binary."""
-    return shutil.which("wall") or os.path.expanduser("~/.local/bin/wall")
+    """Resolve the path to the wall CLI binary.
+
+    Prefer the user-local install so we never accidentally pick up the
+    system 'wall' utility (util-linux) which may appear first on the PATH
+    when launched from Hyprland's exec environment.
+    """
+    local = os.path.expanduser("~/.local/bin/wall")
+    if os.path.isfile(local) and os.access(local, os.X_OK):
+        return local
+    return shutil.which("wall") or local
 
 
 def wall_cmd(*args):
@@ -874,22 +882,23 @@ class WallGui(Gtk.ApplicationWindow):
         super().__init__(application=app, title="wall-gui")
         self.set_default_size(1020, 640)
 
-        self.wallpapers     = load_wallpapers()
+        self.wallpapers     = []
         self.selected_id    = None
-        self.monitors       = get_monitors()
+        self.monitors       = ["*"]
         self._current_media = None
         self._staged_props  = {}
         self._debounce_id   = None
         self._desc_expanded = False
         self._type_filter   = ""
-        self._favorites     = set(load_playlist_ids(FAVORITES_NAME))
+        self._favorites     = set()
         self._flag_checks   = {}
 
         self._build_ui()
-        self._populate_list()
+        self._show_loading_row()
         self._update_count()
         self._refresh_status()
         GLib.timeout_add(3000, self._refresh_status)
+        threading.Thread(target=self._load_data_async, daemon=True).start()
         self._setup_keyboard()
 
     # --- UI building ---
@@ -1216,6 +1225,56 @@ class WallGui(Gtk.ApplicationWindow):
         action.append(overflow_btn)
 
         self.search.grab_focus()
+
+    # --- Async data loading ---
+
+    def _show_loading_row(self):
+        """Show a spinner row in the listbox while wallpapers are loading."""
+        row = Gtk.ListBoxRow(selectable=False)
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        box.set_margin_top(24)
+        box.set_margin_bottom(24)
+        box.set_margin_start(20)
+        box.set_margin_end(20)
+        spinner = Gtk.Spinner()
+        spinner.start()
+        box.append(spinner)
+        lbl = Gtk.Label(label="Loading wallpapers\u2026")
+        lbl.add_css_class("dim-label")
+        box.append(lbl)
+        row.set_child(box)
+        self.listbox.append(row)
+
+    def _load_data_async(self):
+        """Fetch wallpapers, monitors, and favorites in a background thread."""
+        walls    = load_wallpapers()
+        monitors = get_monitors()
+        favs     = set(load_playlist_ids(FAVORITES_NAME))
+        GLib.idle_add(self._on_data_loaded, walls, monitors, favs)
+
+    def _on_data_loaded(self, walls, monitors, favs):
+        """Called on the main thread once background loading completes."""
+        self.wallpapers = walls
+        self.monitors   = monitors
+        self._favorites = favs
+
+        # Rebuild monitor dropdown with real data
+        mon_list = Gtk.StringList.new(self.monitors + (["ALL"] if len(self.monitors) > 1 else []))
+        self.mon_drop.set_model(mon_list)
+        if len(self.monitors) > 1:
+            self.mon_drop.set_selected(len(self.monitors))
+
+        # Clear loading row then populate for real
+        child = self.listbox.get_first_child()
+        while child:
+            nxt = child.get_next_sibling()
+            self.listbox.remove(child)
+            child = nxt
+
+        self._populate_list()
+        self._update_count()
+        self._refresh_status()
+        return False  # do not repeat via GLib
 
     # --- List population ---
 
