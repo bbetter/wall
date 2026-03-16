@@ -1867,7 +1867,7 @@ class App(Gtk.Application):
     """GTK Application entry point."""
 
     def __init__(self):
-        super().__init__(application_id="com.github.bbetter.wall-gui")
+        super().__init__()
 
     def do_activate(self):
         """Create and present the main window."""

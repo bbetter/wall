@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.0.2
+- Fix: wall-gui failed to start due to D-Bus registration timeout; removed application_id from Gtk.Application to bypass D-Bus registration
+
 ## v1.0.1
 - Fix: clamp setting and per-wallpaper flags (disable-particles, disable-parallax, disable-mouse) were dropped by the v1.0.0 refactor; restored in both CLI and GUI
 
