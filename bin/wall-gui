@@ -179,6 +179,17 @@ class SettingsWindow(Gtk.Window):
         box.set_margin_end(24)
         self.set_child(box)
 
+        note = Gtk.Label()
+        note.set_markup(
+            "<small>These settings apply <b>globally</b> to all wallpapers.\n"
+            "Applying will restart the wallpaper engine.</small>"
+        )
+        note.set_halign(Gtk.Align.START)
+        note.add_css_class("dim-label")
+        box.append(note)
+
+        box.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
+
         grid = Gtk.Grid()
         grid.set_column_spacing(16)
         grid.set_row_spacing(12)
@@ -187,6 +198,7 @@ class SettingsWindow(Gtk.Window):
         # FPS
         fps_lbl = Gtk.Label(label="FPS")
         fps_lbl.set_halign(Gtk.Align.START)
+        fps_lbl.set_tooltip_text("Render framerate for all wallpapers")
         grid.attach(fps_lbl, 0, 0, 1, 1)
 
         self._fps_spin = Gtk.SpinButton()
@@ -196,11 +208,18 @@ class SettingsWindow(Gtk.Window):
             page_increment=10, page_size=0
         ))
         self._fps_spin.set_numeric(True)
+        self._fps_spin.set_tooltip_text("Render framerate for all wallpapers")
         grid.attach(self._fps_spin, 1, 0, 1, 1)
+
+        fps_hint = Gtk.Label(label="frames per second")
+        fps_hint.set_halign(Gtk.Align.START)
+        fps_hint.add_css_class("dim-label")
+        grid.attach(fps_hint, 2, 0, 1, 1)
 
         # Scaling
         scl_lbl = Gtk.Label(label="Scaling")
         scl_lbl.set_halign(Gtk.Align.START)
+        scl_lbl.set_tooltip_text("How to fit wallpapers to your screen")
         grid.attach(scl_lbl, 0, 1, 1, 1)
 
         self._scaling_opts = ["fill", "fit", "stretch", "default"]
@@ -209,18 +228,31 @@ class SettingsWindow(Gtk.Window):
         cur_scaling = conf.get("scaling", "fill")
         if cur_scaling in self._scaling_opts:
             self._scl_drop.set_selected(self._scaling_opts.index(cur_scaling))
+        self._scl_drop.set_tooltip_text("fill: crop to fit · fit: letterbox · stretch: distort · default: engine decides")
         grid.attach(self._scl_drop, 1, 1, 1, 1)
+
+        scl_hint = Gtk.Label(label="fill · fit · stretch · default")
+        scl_hint.set_halign(Gtk.Align.START)
+        scl_hint.add_css_class("dim-label")
+        grid.attach(scl_hint, 2, 1, 1, 1)
 
         # Audio
         aud_lbl = Gtk.Label(label="Audio")
         aud_lbl.set_halign(Gtk.Align.START)
+        aud_lbl.set_tooltip_text("Enable audio for wallpapers that have sound")
         grid.attach(aud_lbl, 0, 2, 1, 1)
 
         self._aud_sw = Gtk.Switch()
         self._aud_sw.set_active(conf.get("audio", "0") == "1")
         self._aud_sw.set_halign(Gtk.Align.START)
         self._aud_sw.set_valign(Gtk.Align.CENTER)
+        self._aud_sw.set_tooltip_text("Enable audio for wallpapers that have sound")
         grid.attach(self._aud_sw, 1, 2, 1, 1)
+
+        aud_hint = Gtk.Label(label="for wallpapers with sound")
+        aud_hint.set_halign(Gtk.Align.START)
+        aud_hint.add_css_class("dim-label")
+        grid.attach(aud_hint, 2, 2, 1, 1)
 
         apply_btn = Gtk.Button(label="Apply")
         apply_btn.add_css_class("suggested-action")
@@ -276,21 +308,48 @@ class PlaylistWindow(Gtk.Window):
         spacer.set_hexpand(True)
         toolbar.append(spacer)
 
+        toolbar.append(Gtk.Separator(orientation=Gtk.Orientation.VERTICAL))
+
+        play_on_lbl = Gtk.Label(label="Play on:")
+        play_on_lbl.add_css_class("dim-label")
+        toolbar.append(play_on_lbl)
+
         monitors = get_monitors()
-        mon_choices = monitors + (["ALL"] if len(monitors) > 1 else [])
+        mon_choices = monitors + (["ALL monitors"] if len(monitors) > 1 else [])
         mon_model = Gtk.StringList.new(mon_choices)
         self._mon_drop = Gtk.DropDown(model=mon_model)
         if len(monitors) > 1:
             self._mon_drop.set_selected(len(monitors))
+        self._mon_drop.set_tooltip_text("Which monitor to play the playlist on")
         toolbar.append(self._mon_drop)
 
-        self._play_btn = Gtk.Button(label="Play")
+        every_lbl = Gtk.Label(label="every")
+        every_lbl.add_css_class("dim-label")
+        toolbar.append(every_lbl)
+
+        self._interval_spin = Gtk.SpinButton()
+        self._interval_spin.set_adjustment(Gtk.Adjustment(
+            value=300, lower=10, upper=86400,
+            step_increment=30, page_increment=300, page_size=0
+        ))
+        self._interval_spin.set_numeric(True)
+        self._interval_spin.set_tooltip_text("Seconds between wallpaper changes")
+        self._interval_spin.set_size_request(80, -1)
+        toolbar.append(self._interval_spin)
+
+        s_lbl = Gtk.Label(label="s")
+        s_lbl.add_css_class("dim-label")
+        toolbar.append(s_lbl)
+
+        toolbar.append(Gtk.Separator(orientation=Gtk.Orientation.VERTICAL))
+
+        self._play_btn = Gtk.Button(label="▶ Play")
         self._play_btn.add_css_class("suggested-action")
         self._play_btn.set_sensitive(False)
         self._play_btn.connect("clicked", self._on_play)
         toolbar.append(self._play_btn)
 
-        self._shuffle_btn = Gtk.Button(label="Shuffle")
+        self._shuffle_btn = Gtk.Button(label="⇄ Shuffle")
         self._shuffle_btn.set_sensitive(False)
         self._shuffle_btn.connect("clicked", self._on_shuffle)
         toolbar.append(self._shuffle_btn)
@@ -505,9 +564,10 @@ class PlaylistWindow(Gtk.Window):
         if not self._selected_playlist:
             return
         item = self._mon_drop.get_selected_item()
-        monitor = item.get_string() if item else "ALL"
-        args = ["playlist", "play", self._selected_playlist, "300"]
-        if monitor != "ALL":
+        monitor = item.get_string() if item else "ALL monitors"
+        interval = str(int(self._interval_spin.get_value()))
+        args = ["playlist", "play", self._selected_playlist, interval]
+        if monitor != "ALL monitors":
             args.append(monitor)
         wall_cmd(*args)
 
@@ -515,9 +575,10 @@ class PlaylistWindow(Gtk.Window):
         if not self._selected_playlist:
             return
         item = self._mon_drop.get_selected_item()
-        monitor = item.get_string() if item else "ALL"
-        args = ["playlist", "shuffle", self._selected_playlist, "300"]
-        if monitor != "ALL":
+        monitor = item.get_string() if item else "ALL monitors"
+        interval = str(int(self._interval_spin.get_value()))
+        args = ["playlist", "shuffle", self._selected_playlist, interval]
+        if monitor != "ALL monitors":
             args.append(monitor)
         wall_cmd(*args)
 
