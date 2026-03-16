@@ -121,7 +121,7 @@ def load_saved_props(wall_id):
 
 def load_config():
     """Read ~/.config/wall/config into a dict."""
-    conf = {"fps": "60", "scaling": "fill", "audio": "0", "volume": "15"}
+    conf = {"fps": "60", "scaling": "fill", "audio": "0", "volume": "15", "fullscreen_pause": "0"}
     config_file = os.path.expanduser("~/.config/wall/config")
     if os.path.exists(config_file):
         with open(config_file) as f:
@@ -187,7 +187,7 @@ class SettingsWindow(Gtk.Window):
 
     def __init__(self, parent):
         super().__init__(title="Settings", transient_for=parent, modal=True)
-        self.set_default_size(400, 280)
+        self.set_default_size(400, 320)
         self.set_resizable(False)
 
         conf = load_config()
@@ -298,6 +298,24 @@ class SettingsWindow(Gtk.Window):
         vol_hint.add_css_class("dim-label")
         grid.attach(vol_hint, 2, 3, 1, 1)
 
+        # Fullscreen pause
+        fsp_lbl = Gtk.Label(label="Pause on fullscreen")
+        fsp_lbl.set_halign(Gtk.Align.START)
+        fsp_lbl.set_tooltip_text("Pause wallpapers when a fullscreen app is open")
+        grid.attach(fsp_lbl, 0, 4, 1, 1)
+
+        self._fsp_sw = Gtk.Switch()
+        self._fsp_sw.set_active(conf.get("fullscreen_pause", "0") == "1")
+        self._fsp_sw.set_halign(Gtk.Align.START)
+        self._fsp_sw.set_valign(Gtk.Align.CENTER)
+        self._fsp_sw.set_tooltip_text("Pause wallpapers when a fullscreen app is open")
+        grid.attach(self._fsp_sw, 1, 4, 1, 1)
+
+        fsp_hint = Gtk.Label(label="on any monitor")
+        fsp_hint.set_halign(Gtk.Align.START)
+        fsp_hint.add_css_class("dim-label")
+        grid.attach(fsp_hint, 2, 4, 1, 1)
+
         apply_btn = Gtk.Button(label="Apply")
         apply_btn.add_css_class("suggested-action")
         apply_btn.connect("clicked", self._on_apply)
@@ -307,14 +325,28 @@ class SettingsWindow(Gtk.Window):
         self._vol_scale.set_sensitive(not sw.get_active())
 
     def _on_apply(self, _btn):
-        fps = str(int(self._fps_spin.get_value()))
-        scaling = self._scaling_opts[self._scl_drop.get_selected()]
-        audio = "0" if self._sil_sw.get_active() else "1"
-        volume = str(int(self._vol_scale.get_value()))
-        wall_cmd("set", "fps", fps)
-        wall_cmd("set", "scaling", scaling)
-        wall_cmd("set", "audio", audio)
-        wall_cmd("set", "volume", volume)
+        updates = {
+            "FPS":              str(int(self._fps_spin.get_value())),
+            "SCALING":          self._scaling_opts[self._scl_drop.get_selected()],
+            "AUDIO":            "0" if self._sil_sw.get_active() else "1",
+            "VOLUME":           str(int(self._vol_scale.get_value())),
+            "FULLSCREEN_PAUSE": "1" if self._fsp_sw.get_active() else "0",
+        }
+        config_file = os.path.expanduser("~/.config/wall/config")
+        os.makedirs(os.path.dirname(config_file), exist_ok=True)
+        conf = {}
+        if os.path.exists(config_file):
+            with open(config_file) as f:
+                for line in f:
+                    line = line.strip()
+                    if "=" in line and not line.startswith("#"):
+                        k, v = line.split("=", 1)
+                        conf[k.upper()] = v
+        conf.update(updates)
+        with open(config_file, "w") as f:
+            for k, v in conf.items():
+                f.write(f"{k}={v}\n")
+        wall_cmd("reload")
         self.close()
 
 

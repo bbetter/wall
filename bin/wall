@@ -4,7 +4,7 @@
 # CONFIG
 ########################################
 
-VERSION="0.9.3"
+VERSION="0.9.4"
 
 CONFIG_FILE="$HOME/.config/wall/config"
 
@@ -33,6 +33,7 @@ FPS=60
 SCALING=fill
 AUDIO=0
 VOLUME=15
+FULLSCREEN_PAUSE=0
 
 mkdir -p "$STATE_DIR" "$MON_DIR"
 
@@ -176,6 +177,9 @@ else
     AUDIO_FLAGS=(--volume "${VOLUME:-15}")
 fi
 
+local PAUSE_FLAGS=()
+[ "${FULLSCREEN_PAUSE:-0}" = "0" ] && PAUSE_FLAGS=(--no-fullscreen-pause)
+
 linux-wallpaperengine \
     "$DIR" \
     --assets-dir "$ASSETS" \
@@ -183,6 +187,7 @@ linux-wallpaperengine \
     --scaling "$SCALING" \
     --fps "$FPS" \
     "${AUDIO_FLAGS[@]}" \
+    "${PAUSE_FLAGS[@]}" \
     "${PROP_FLAGS[@]}" &
 
 local LAUNCHED_PID=$!
@@ -700,6 +705,28 @@ log "Daemon started"
 
 wait_for_steam
 
+# Restore wallpapers from saved state (e.g. after settings reload)
+shopt -s nullglob
+for _MON_PATH in "$MON_DIR"/*/; do
+    _MON_NAME=$(basename "$_MON_PATH")
+    _CURRENT=$(cat "${_MON_PATH}current" 2>/dev/null)
+    [ -z "$_CURRENT" ] && continue
+    [ -d "$WORKSHOP_DIR/$_CURRENT" ] || continue
+    log "Restoring wallpaper on $_MON_NAME: $_CURRENT"
+    launch_on_monitor "$WORKSHOP_DIR/$_CURRENT" "$_MON_NAME"
+    _MODE=$(cat "${_MON_PATH}mode" 2>/dev/null)
+    case "$_MODE" in
+        cycle|shuffle|playlist|playlist_shuffle)
+            _EXISTING_TICK=$(cat "${_MON_PATH}next_tick" 2>/dev/null)
+            _NOW=$(date +%s)
+            if [ -z "$_EXISTING_TICK" ] || [ "$_NOW" -ge "$_EXISTING_TICK" ]; then
+                schedule_next_tick "$_MON_NAME"
+            fi
+            ;;
+    esac
+done
+shopt -u nullglob
+
 while true; do
 
     ################################
@@ -860,6 +887,19 @@ if is_running; then
 fi
 
 log "Starting daemon"
+
+nohup "$0" daemon >/dev/null 2>&1 &
+;;
+
+reload)
+
+if is_running; then
+    kill "$(cat "$PIDFILE")" 2>/dev/null
+    rm -f "$PIDFILE"
+    sleep 0.5
+fi
+
+log "Reloading daemon"
 
 nohup "$0" daemon >/dev/null 2>&1 &
 ;;
@@ -1273,6 +1313,15 @@ set)
                 exit 1
             fi
             ;;
+        fullscreen_pause)
+            case "$VAL" in
+                0|1) ;;
+                *)
+                    echo "Error: fullscreen_pause must be 0 (no pause) or 1 (pause)"
+                    exit 1
+                    ;;
+            esac
+            ;;
         *)
             echo "Usage: wall set <setting> <value>"
             echo ""
@@ -1280,6 +1329,7 @@ set)
             echo "  wall set scaling <fill|fit|stretch|default>"
             echo "  wall set audio <0|1>                     (0=silent, 1=enabled)"
             echo "  wall set volume <0-100>"
+            echo "  wall set fullscreen_pause <0|1>          (0=no pause, 1=pause)"
             exit 1
             ;;
     esac
@@ -1297,10 +1347,7 @@ set)
 
     if is_running; then
         echo "Restarting daemon to apply..."
-        kill "$(cat "$PIDFILE")" 2>/dev/null
-        rm -f "$PIDFILE"
-        sleep 0.5
-        "$0" start
+        "$0" reload
         echo "Done."
     fi
 ;;

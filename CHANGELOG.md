@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.9.4
+- Fix: settings apply now restores wallpapers (daemon restore logic on startup)
+- Fix: wallpapers on idle monitors no longer pause when a fullscreen app opens on another monitor
+- Add `wall reload` command — restarts daemon and restores all active wallpapers
+- Settings: single restart on apply instead of one per setting
+- Settings: "Pause on fullscreen" toggle (off by default)
+
 ## v0.9.3
 - Favorites playlist: protected built-in playlist, ★/☆ toggle in detail panel, ★ badge in list
 - Drag-and-drop reordering of entries in any playlist (⠿ handle)
