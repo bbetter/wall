@@ -22,7 +22,7 @@
 # CONFIG
 ########################################
 
-VERSION="1.0.4"
+VERSION="1.0.5"
 
 CONFIG_FILE="$HOME/.config/wall/config"
 
@@ -85,12 +85,20 @@ is_running() {
 ########################################
 
 # Block until the Steam workshop directory is accessible.
-# Gives up after STEAM_WAIT_TIMEOUT seconds (default 30) and continues
-# anyway, so commands like 'list' don't hang indefinitely when the drive
-# is simply not present (e.g. launched from Hyprland before automount).
+# For local paths (under $HOME) there is nothing to wait for — fail fast.
+# For external/network paths, poll until STEAM_WAIT_TIMEOUT seconds (default 30)
+# then continue anyway so commands don't hang indefinitely when a drive is absent.
 wait_for_steam() {
 
+[ -d "$WORKSHOP_DIR" ] && return
+
+if [[ "$STEAM_LIB" == "$HOME"* ]]; then
+    log "WARNING: SteamLibrary not found at $STEAM_LIB — check STEAM_LIB in config"
+    return 1
+fi
+
 local DEADLINE=$(( $(date +%s) + ${STEAM_WAIT_TIMEOUT:-30} ))
+local _logged=0
 
 while true; do
 
@@ -101,7 +109,10 @@ while true; do
         return 1
     fi
 
-    log "Waiting for SteamLibrary mount"
+    if [ "$_logged" -eq 0 ]; then
+        log "Waiting for SteamLibrary mount at $STEAM_LIB"
+        _logged=1
+    fi
 
     sleep 2
 
