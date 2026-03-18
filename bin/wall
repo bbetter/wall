@@ -22,7 +22,7 @@
 # CONFIG
 ########################################
 
-VERSION="1.0.5"
+VERSION="1.0.6"
 
 CONFIG_FILE="$HOME/.config/wall/config"
 
@@ -71,6 +71,15 @@ log() {
     echo "$(date '+%H:%M:%S') $*" >> "$LOGFILE"
 }
 
+# Log resolved config and paths once at startup (aids debugging).
+if [ -f "$CONFIG_FILE" ]; then
+    log "startup: config loaded from $CONFIG_FILE"
+else
+    log "startup: no config at $CONFIG_FILE — using defaults"
+fi
+log "startup: STEAM_LIB=$STEAM_LIB"
+log "startup: WORKSHOP_DIR=$WORKSHOP_DIR (exists=$([ -d "$WORKSHOP_DIR" ] && echo yes || echo no))"
+
 ########################################
 # DAEMON CONTROL
 ########################################
@@ -92,26 +101,24 @@ wait_for_steam() {
 
 [ -d "$WORKSHOP_DIR" ] && return
 
+log "wait_for_steam: WORKSHOP_DIR not found: $WORKSHOP_DIR"
+
 if [[ "$STEAM_LIB" == "$HOME"* ]]; then
-    log "WARNING: SteamLibrary not found at $STEAM_LIB — check STEAM_LIB in config"
+    log "WARNING: STEAM_LIB is a local path but workshop dir is missing — check STEAM_LIB in config (current: $STEAM_LIB)"
     return 1
 fi
 
+log "wait_for_steam: STEAM_LIB appears external ($STEAM_LIB) — polling for mount"
+
 local DEADLINE=$(( $(date +%s) + ${STEAM_WAIT_TIMEOUT:-30} ))
-local _logged=0
 
 while true; do
 
     [ -d "$WORKSHOP_DIR" ] && return
 
     if [ $(date +%s) -ge "$DEADLINE" ]; then
-        log "WARNING: SteamLibrary not found after ${STEAM_WAIT_TIMEOUT:-30}s — continuing anyway"
+        log "WARNING: SteamLibrary not found after ${STEAM_WAIT_TIMEOUT:-30}s at $WORKSHOP_DIR — continuing anyway"
         return 1
-    fi
-
-    if [ "$_logged" -eq 0 ]; then
-        log "Waiting for SteamLibrary mount at $STEAM_LIB"
-        _logged=1
     fi
 
     sleep 2
