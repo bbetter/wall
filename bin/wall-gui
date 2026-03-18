@@ -86,12 +86,21 @@ def get_wall_bin():
     return shutil.which("wall") or local
 
 
-def wall_cmd(*args):
-    """Run a wall subcommand, return stdout as a string."""
-    return subprocess.run(
-        [get_wall_bin(), *args],
-        capture_output=True, text=True
-    ).stdout
+def wall_cmd(*args, timeout=45):
+    """Run a wall subcommand, return stdout as a string.
+
+    timeout: seconds to wait before giving up (default 45).  Prevents
+    wall-gui from hanging indefinitely when the Steam library drive is
+    not yet mounted and wait_for_steam() would otherwise loop forever.
+    """
+    try:
+        return subprocess.run(
+            [get_wall_bin(), *args],
+            capture_output=True, text=True,
+            timeout=timeout,
+        ).stdout
+    except subprocess.TimeoutExpired:
+        return ""
 
 
 def load_wallpapers():
@@ -1246,7 +1255,12 @@ class WallGui(Gtk.ApplicationWindow):
         self.listbox.append(row)
 
     def _load_data_async(self):
-        """Fetch wallpapers, monitors, and favorites in a background thread."""
+        """Fetch wallpapers, monitors, and favorites in a background thread.
+
+        If 'wall list' times out (Steam library drive not yet mounted),
+        walls will be empty and the UI will show an appropriate message
+        with a Refresh button rather than spinning forever.
+        """
         walls    = load_wallpapers()
         monitors = get_monitors()
         favs     = set(load_playlist_ids(FAVORITES_NAME))
@@ -1295,11 +1309,11 @@ class WallGui(Gtk.ApplicationWindow):
 
             msg = Gtk.Label()
             msg.set_markup(
-                "<b>Nothing to put on your walls.</b>\n\n"
-                "Either Steam is still waking up,\n"
-                "or your Wallpaper Engine workshop\n"
-                "is as empty as this window.\n\n"
-                "<tt>wall cache rebuild</tt>"
+                "<b>No wallpapers found.</b>\n\n"
+                "The SteamLibrary drive may not be\n"
+                "mounted yet. Click <b>↻</b> to retry\n"
+                "once the drive is available.\n\n"
+                "<tt>wall cache rebuild</tt>  to force a rescan."
             )
             msg.set_justify(Gtk.Justification.CENTER)
             msg.add_css_class("dim-label")
