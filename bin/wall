@@ -22,7 +22,7 @@
 # CONFIG
 ########################################
 
-VERSION="1.0.6"
+VERSION="1.0.7"
 
 CONFIG_FILE="$HOME/.config/wall/config"
 
@@ -69,14 +69,14 @@ mkdir -p "$STATE_DIR" "$MON_DIR"
 
 # Append a timestamped message to the log file.
 log() {
-    echo "$(date '+%H:%M:%S') $*" >> "$LOGFILE"
+  echo "$(date '+%H:%M:%S') $*" >>"$LOGFILE"
 }
 
 # Log resolved config and paths once at startup (aids debugging).
 if [ -f "$CONFIG_FILE" ]; then
-    log "startup: config loaded from $CONFIG_FILE"
+  log "startup: config loaded from $CONFIG_FILE"
 else
-    log "startup: no config at $CONFIG_FILE — using defaults"
+  log "startup: no config at $CONFIG_FILE — using defaults"
 fi
 log "startup: STEAM_LIB=$STEAM_LIB"
 log "startup: WORKSHOP_DIR=$WORKSHOP_DIR (exists=$([ -d "$WORKSHOP_DIR" ] && echo yes || echo no))"
@@ -87,7 +87,7 @@ log "startup: WORKSHOP_DIR=$WORKSHOP_DIR (exists=$([ -d "$WORKSHOP_DIR" ] && ech
 
 # Check whether the daemon process is alive.
 is_running() {
-    [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null
+  [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null
 }
 
 ########################################
@@ -100,31 +100,31 @@ is_running() {
 # then continue anyway so commands don't hang indefinitely when a drive is absent.
 wait_for_steam() {
 
-[ -d "$WORKSHOP_DIR" ] && return
+  [ -d "$WORKSHOP_DIR" ] && return
 
-log "wait_for_steam: WORKSHOP_DIR not found: $WORKSHOP_DIR"
+  log "wait_for_steam: WORKSHOP_DIR not found: $WORKSHOP_DIR"
 
-if [[ "$STEAM_LIB" == "$HOME"* ]]; then
+  if [[ "$STEAM_LIB" == "$HOME"* ]]; then
     log "WARNING: STEAM_LIB is a local path but workshop dir is missing — check STEAM_LIB in config (current: $STEAM_LIB)"
     return 1
-fi
+  fi
 
-log "wait_for_steam: STEAM_LIB appears external ($STEAM_LIB) — polling for mount"
+  log "wait_for_steam: STEAM_LIB appears external ($STEAM_LIB) — polling for mount"
 
-local DEADLINE=$(( $(date +%s) + ${STEAM_WAIT_TIMEOUT:-30} ))
+  local DEADLINE=$(($(date +%s) + ${STEAM_WAIT_TIMEOUT:-30}))
 
-while true; do
+  while true; do
 
     [ -d "$WORKSHOP_DIR" ] && return
 
     if [ $(date +%s) -ge "$DEADLINE" ]; then
-        log "WARNING: SteamLibrary not found after ${STEAM_WAIT_TIMEOUT:-30}s at $WORKSHOP_DIR — continuing anyway"
-        return 1
+      log "WARNING: SteamLibrary not found after ${STEAM_WAIT_TIMEOUT:-30}s at $WORKSHOP_DIR — continuing anyway"
+      return 1
     fi
 
     sleep 2
 
-done
+  done
 
 }
 
@@ -136,22 +136,22 @@ done
 # Falls back to "*" (all monitors) if no tool is available.
 get_monitors() {
 
-if command -v hyprctl >/dev/null; then
+  if command -v hyprctl >/dev/null; then
     hyprctl monitors -j | jq -r '.[].name'
     return
-fi
+  fi
 
-if command -v kscreen-doctor >/dev/null; then
+  if command -v kscreen-doctor >/dev/null; then
     kscreen-doctor -o | awk '/Output/ {print $3}'
     return
-fi
+  fi
 
-if command -v xrandr >/dev/null; then
+  if command -v xrandr >/dev/null; then
     xrandr | awk '/ connected/{print $1}'
     return
-fi
+  fi
 
-echo "*"
+  echo "*"
 
 }
 
@@ -161,9 +161,9 @@ echo "*"
 
 # Return (and ensure) the per-monitor state directory path.
 mon_state_dir() {
-    local d="$MON_DIR/$1"
-    mkdir -p "$d"
-    echo "$d"
+  local d="$MON_DIR/$1"
+  mkdir -p "$d"
+  echo "$d"
 }
 
 ########################################
@@ -173,33 +173,33 @@ mon_state_dir() {
 # Kill the wallpaper process on a single monitor and clean up its PID file.
 stop_monitor() {
 
-local MON="$1"
-local D
-D=$(mon_state_dir "$MON")
+  local MON="$1"
+  local D
+  D=$(mon_state_dir "$MON")
 
-if [ -f "$D/pid" ]; then
+  if [ -f "$D/pid" ]; then
     local PID
     PID=$(cat "$D/pid")
     kill "$PID" 2>/dev/null
     rm -f "$D/pid"
     log "Stopped $MON (pid $PID)"
-fi
+  fi
 
 }
 
 # Stop wallpaper processes on all monitors, plus a pkill safety net.
 stop_wallpapers() {
 
-log "Stopping all wallpapers"
+  log "Stopping all wallpapers"
 
-shopt -s nullglob
-for MON_PATH in "$MON_DIR"/*/; do
+  shopt -s nullglob
+  for MON_PATH in "$MON_DIR"/*/; do
     stop_monitor "$(basename "$MON_PATH")"
-done
-shopt -u nullglob
+  done
+  shopt -u nullglob
 
-# Safety net for processes started before per-monitor PID tracking
-pkill -f "$(basename "$ENGINE_BIN")" 2>/dev/null
+  # Safety net for processes started before per-monitor PID tracking
+  pkill -f "$(basename "$ENGINE_BIN")" 2>/dev/null
 
 }
 
@@ -212,48 +212,48 @@ pkill -f "$(basename "$ENGINE_BIN")" 2>/dev/null
 # property overrides, and records the PID and current wallpaper ID in state.
 launch_on_monitor() {
 
-local DIR="$1"
-local MON="$2"
-local D
-D=$(mon_state_dir "$MON")
+  local DIR="$1"
+  local MON="$2"
+  local D
+  D=$(mon_state_dir "$MON")
 
-local TITLE
-TITLE=$(jq -r '.title' "$DIR/project.json")
+  local TITLE
+  TITLE=$(jq -r '.title' "$DIR/project.json")
 
-log "Launching: $TITLE on $MON"
+  log "Launching: $TITLE on $MON"
 
-stop_monitor "$MON"
+  stop_monitor "$MON"
 
-local ID
-ID=$(basename "$DIR")
+  local ID
+  ID=$(basename "$DIR")
 
-local PROP_FLAGS=()
-local PROP_FILE="$PROPS_DIR/$ID"
-if [ -f "$PROP_FILE" ]; then
+  local PROP_FLAGS=()
+  local PROP_FILE="$PROPS_DIR/$ID"
+  if [ -f "$PROP_FILE" ]; then
     while IFS= read -r _line; do
-        [ -n "$_line" ] && PROP_FLAGS+=(--set-property "$_line")
-    done < "$PROP_FILE"
-fi
+      [ -n "$_line" ] && PROP_FLAGS+=(--set-property "$_line")
+    done <"$PROP_FILE"
+  fi
 
-local WP_FLAGS=()
-local FLAGS_FILE="$FLAGS_DIR/$ID"
-if [ -f "$FLAGS_FILE" ]; then
+  local WP_FLAGS=()
+  local FLAGS_FILE="$FLAGS_DIR/$ID"
+  if [ -f "$FLAGS_FILE" ]; then
     while IFS= read -r _flag; do
-        [ -n "$_flag" ] && WP_FLAGS+=("--$_flag")
-    done < "$FLAGS_FILE"
-fi
+      [ -n "$_flag" ] && WP_FLAGS+=("--$_flag")
+    done <"$FLAGS_FILE"
+  fi
 
-local AUDIO_FLAGS=()
-if [ "${AUDIO:-0}" = "0" ]; then
+  local AUDIO_FLAGS=()
+  if [ "${AUDIO:-0}" = "0" ]; then
     AUDIO_FLAGS=(--silent)
-else
+  else
     AUDIO_FLAGS=(--volume "${VOLUME:-15}")
-fi
+  fi
 
-local PAUSE_FLAGS=()
-[ "${FULLSCREEN_PAUSE:-0}" = "0" ] && PAUSE_FLAGS=(--no-fullscreen-pause)
+  local PAUSE_FLAGS=()
+  [ "${FULLSCREEN_PAUSE:-0}" = "0" ] && PAUSE_FLAGS=(--no-fullscreen-pause)
 
-"$ENGINE_BIN" \
+  "$ENGINE_BIN" \
     "$DIR" \
     --assets-dir "$ASSETS" \
     --screen-root "$MON" \
@@ -265,9 +265,9 @@ local PAUSE_FLAGS=()
     "${WP_FLAGS[@]}" \
     "${PROP_FLAGS[@]}" &
 
-local LAUNCHED_PID=$!
-echo "$LAUNCHED_PID" > "$D/pid"
-echo "$ID" > "$D/current"
+  local LAUNCHED_PID=$!
+  echo "$LAUNCHED_PID" >"$D/pid"
+  echo "$ID" >"$D/current"
 
 }
 
@@ -278,9 +278,9 @@ echo "$ID" > "$D/current"
 # Check if the cache file exists and is newer than all project.json files.
 cache_valid() {
 
-[ -f "$CACHE_FILE" ] || return 1
+  [ -f "$CACHE_FILE" ] || return 1
 
-[ -z "$(find "$WORKSHOP_DIR" -name "project.json" -newer "$CACHE_FILE" -print -quit 2>/dev/null)" ]
+  [ -z "$(find "$WORKSHOP_DIR" -name "project.json" -newer "$CACHE_FILE" -print -quit 2>/dev/null)" ]
 
 }
 
@@ -289,11 +289,11 @@ cache_valid() {
 # Only video, scene, web, and application types are included.
 build_list_cache() {
 
-log "Building list cache"
+  log "Building list cache"
 
-local tmp="$CACHE_FILE.tmp"
+  local tmp="$CACHE_FILE.tmp"
 
-for d in "$WORKSHOP_DIR"/*; do
+  for d in "$WORKSHOP_DIR"/*; do
 
     [ -f "$d/project.json" ] || continue
 
@@ -301,31 +301,31 @@ for d in "$WORKSHOP_DIR"/*; do
     ID=$(basename "$d")
 
     local TITLE TYPE TAGS DESC
-    IFS=$'\t' read -r TITLE TYPE TAGS DESC <<< "$(jq -r '"\(.title)\t\((.type // "") | ascii_downcase)\t\([.tags[]? | tostring] | join(", "))\t\((.description // "") | gsub("\n"; " ") | gsub("\t"; " "))"' "$d/project.json")"
+    IFS=$'\t' read -r TITLE TYPE TAGS DESC <<<"$(jq -r '"\(.title)\t\((.type // "") | ascii_downcase)\t\([.tags[]? | tostring] | join(", "))\t\((.description // "") | gsub("\n"; " ") | gsub("\t"; " "))"' "$d/project.json")"
 
     case "$TYPE" in
-        scene|video)
-            local FILE
-            FILE=$(jq -r '.file // ""' "$d/project.json")
-            [ -n "$FILE" ] && { [ -f "$d/$FILE" ] || [ -f "$d/${FILE%.json}.pkg" ]; } || continue
-            printf "%s\t%s\t%s\t%s\t%s\n" "$ID" "$TITLE" "$TAGS" "$TYPE" "$DESC"
-        ;;
-        web|application)
-            printf "%s\t%s\t%s\t%s\t%s\n" "$ID" "$TITLE" "$TAGS" "$TYPE" "$DESC"
-        ;;
+    scene | video)
+      local FILE
+      FILE=$(jq -r '.file // ""' "$d/project.json")
+      [ -n "$FILE" ] && { [ -f "$d/$FILE" ] || [ -f "$d/${FILE%.json}.pkg" ]; } || continue
+      printf "%s\t%s\t%s\t%s\t%s\n" "$ID" "$TITLE" "$TAGS" "$TYPE" "$DESC"
+      ;;
+    web | application)
+      printf "%s\t%s\t%s\t%s\t%s\n" "$ID" "$TITLE" "$TAGS" "$TYPE" "$DESC"
+      ;;
     esac
 
-done | sort > "$tmp" && mv "$tmp" "$CACHE_FILE"
+  done | sort >"$tmp" && mv "$tmp" "$CACHE_FILE"
 
-CACHE_COUNT=$(wc -l < "$CACHE_FILE")
-log "List cache built ($CACHE_COUNT entries)"
+  CACHE_COUNT=$(wc -l <"$CACHE_FILE")
+  log "List cache built ($CACHE_COUNT entries)"
 
 }
 
 # Rebuild the cache if it is stale or missing.
 ensure_cache() {
 
-cache_valid || build_list_cache
+  cache_valid || build_list_cache
 
 }
 
@@ -336,18 +336,18 @@ cache_valid || build_list_cache
 # Load all non-excluded wallpaper paths into the WALLS array. Sets TOTAL.
 load_walls() {
 
-ensure_cache
+  ensure_cache
 
-mapfile -t WALLS < <(
+  mapfile -t WALLS < <(
     while IFS=$'\t' read -r ID _; do
-        grep -qxF "$ID" "$EXCLUDED_FILE" 2>/dev/null && continue
-        echo "$WORKSHOP_DIR/$ID"
-    done < "$CACHE_FILE"
-)
+      grep -qxF "$ID" "$EXCLUDED_FILE" 2>/dev/null && continue
+      echo "$WORKSHOP_DIR/$ID"
+    done <"$CACHE_FILE"
+  )
 
-TOTAL=${#WALLS[@]}
+  TOTAL=${#WALLS[@]}
 
-log "Loaded wallpapers: $TOTAL"
+  log "Loaded wallpapers: $TOTAL"
 
 }
 
@@ -359,35 +359,35 @@ log "Loaded wallpapers: $TOTAL"
 # Skips IDs that are not in the cache (e.g. unsubscribed wallpapers).
 load_playlist_walls() {
 
-local NAME="$1"
-local PFILE="$PLAYLISTS_DIR/$NAME"
+  local NAME="$1"
+  local PFILE="$PLAYLISTS_DIR/$NAME"
 
-if [ ! -f "$PFILE" ]; then
+  if [ ! -f "$PFILE" ]; then
     log "Playlist '$NAME' not found: $PFILE"
     WALLS=()
     TOTAL=0
     return 1
-fi
+  fi
 
-ensure_cache
+  ensure_cache
 
-local -A CACHE_IDS
-while IFS=$'\t' read -r ID _; do
+  local -A CACHE_IDS
+  while IFS=$'\t' read -r ID _; do
     CACHE_IDS["$ID"]=1
-done < "$CACHE_FILE"
+  done <"$CACHE_FILE"
 
-WALLS=()
-while IFS= read -r ID; do
+  WALLS=()
+  while IFS= read -r ID; do
     [ -z "$ID" ] && continue
     if [ -z "${CACHE_IDS[$ID]+_}" ]; then
-        log "Playlist '$NAME': skipping unknown ID $ID"
-        continue
+      log "Playlist '$NAME': skipping unknown ID $ID"
+      continue
     fi
     WALLS+=("$WORKSHOP_DIR/$ID")
-done < "$PFILE"
+  done <"$PFILE"
 
-TOTAL=${#WALLS[@]}
-log "Playlist '$NAME' loaded: $TOTAL walls"
+  TOTAL=${#WALLS[@]}
+  log "Playlist '$NAME' loaded: $TOTAL walls"
 
 }
 
@@ -400,33 +400,33 @@ log "Playlist '$NAME' loaded: $TOTAL walls"
 # different wallpaper; this searches for the correct one and updates state.
 validate_index_for() {
 
-local MON="$1"
-local D
-D=$(mon_state_dir "$MON")
+  local MON="$1"
+  local D
+  D=$(mon_state_dir "$MON")
 
-local IDX
-IDX=$(cat "$D/index" 2>/dev/null || echo 0)
+  local IDX
+  IDX=$(cat "$D/index" 2>/dev/null || echo 0)
 
-local CURRENT_ID
-CURRENT_ID=$(cat "$D/current" 2>/dev/null)
+  local CURRENT_ID
+  CURRENT_ID=$(cat "$D/current" 2>/dev/null)
 
-if [ -n "$CURRENT_ID" ] && [ "$(basename "${WALLS[$IDX]:-}")" != "$CURRENT_ID" ]; then
+  if [ -n "$CURRENT_ID" ] && [ "$(basename "${WALLS[$IDX]:-}")" != "$CURRENT_ID" ]; then
 
     log "Stale index $IDX for $MON (expected $CURRENT_ID), searching"
 
     local i
     for i in "${!WALLS[@]}"; do
-        if [ "$(basename "${WALLS[$i]}")" = "$CURRENT_ID" ]; then
-            IDX=$i
-            echo "$IDX" > "$D/index"
-            log "Corrected index to $IDX for $MON"
-            break
-        fi
+      if [ "$(basename "${WALLS[$i]}")" = "$CURRENT_ID" ]; then
+        IDX=$i
+        echo "$IDX" >"$D/index"
+        log "Corrected index to $IDX for $MON"
+        break
+      fi
     done
 
-fi
+  fi
 
-echo "$IDX"
+  echo "$IDX"
 
 }
 
@@ -438,19 +438,19 @@ echo "$IDX"
 # The daemon loop compares this timestamp to decide when to advance.
 schedule_next_tick() {
 
-local MON="$1"
-local D
-D=$(mon_state_dir "$MON")
+  local MON="$1"
+  local D
+  D=$(mon_state_dir "$MON")
 
-local MODE
-MODE=$(cat "$D/mode" 2>/dev/null)
+  local MODE
+  MODE=$(cat "$D/mode" 2>/dev/null)
 
-if [ "$MODE" = "cycle" ] || [ "$MODE" = "shuffle" ] \
-   || [ "$MODE" = "playlist" ] || [ "$MODE" = "playlist_shuffle" ]; then
+  if [ "$MODE" = "cycle" ] || [ "$MODE" = "shuffle" ] ||
+    [ "$MODE" = "playlist" ] || [ "$MODE" = "playlist_shuffle" ]; then
     local INTERVAL
     INTERVAL=$(cat "$CYCLE_FILE" 2>/dev/null || echo 300)
-    echo $(( $(date +%s) + INTERVAL )) > "$D/next_tick"
-fi
+    echo $(($(date +%s) + INTERVAL)) >"$D/next_tick"
+  fi
 
 }
 
@@ -461,13 +461,13 @@ fi
 # Generate a randomised index sequence for a monitor's shuffle order.
 build_shuffle_for() {
 
-local MON="$1"
-local D
-D=$(mon_state_dir "$MON")
+  local MON="$1"
+  local D
+  D=$(mon_state_dir "$MON")
 
-shuf -i "0-$(( TOTAL - 1 ))" > "$D/shuffle"
+  shuf -i "0-$((TOTAL - 1))" >"$D/shuffle"
 
-log "Shuffle list built for $MON ($TOTAL entries)"
+  log "Shuffle list built for $MON ($TOTAL entries)"
 
 }
 
@@ -480,63 +480,63 @@ log "Shuffle list built for $MON ($TOTAL entries)"
 # rebuilds it when exhausted. In cycle/playlist modes, wraps sequentially.
 next_wallpaper_for() {
 
-local MON="$1"
-local D
-D=$(mon_state_dir "$MON")
+  local MON="$1"
+  local D
+  D=$(mon_state_dir "$MON")
 
-log "next_wallpaper_for: $MON"
+  log "next_wallpaper_for: $MON"
 
-local MODE
-MODE=$(cat "$D/mode" 2>/dev/null || echo idle)
+  local MODE
+  MODE=$(cat "$D/mode" 2>/dev/null || echo idle)
 
-if [ "$MODE" = "playlist" ] || [ "$MODE" = "playlist_shuffle" ]; then
+  if [ "$MODE" = "playlist" ] || [ "$MODE" = "playlist_shuffle" ]; then
     local PL_NAME
     PL_NAME=$(cat "$D/playlist" 2>/dev/null)
     load_playlist_walls "$PL_NAME" || return 1
     if [ "$TOTAL" -eq 0 ]; then
-        log "next_wallpaper_for $MON: playlist empty, stopping"
-        return 1
+      log "next_wallpaper_for $MON: playlist empty, stopping"
+      return 1
     fi
-else
+  else
     load_walls
-fi
+  fi
 
-if [ "$MODE" = "shuffle" ] || [ "$MODE" = "playlist_shuffle" ]; then
+  if [ "$MODE" = "shuffle" ] || [ "$MODE" = "playlist_shuffle" ]; then
 
     local -a SHUFFLE_IDX
-    mapfile -t SHUFFLE_IDX < "$D/shuffle" 2>/dev/null
+    mapfile -t SHUFFLE_IDX <"$D/shuffle" 2>/dev/null
 
     # POS tracks position within the shuffle index list, not the wall list directly.
     # SHUFFLE_IDX[POS] gives the actual index into the WALLS array.
     local POS
     POS=$(cat "$D/index" 2>/dev/null || echo -1)
-    POS=$(( POS + 1 ))
+    POS=$((POS + 1))
 
     # Rebuild shuffle order when all entries have been shown
     if [ "$POS" -ge "${#SHUFFLE_IDX[@]}" ]; then
-        build_shuffle_for "$MON"
-        mapfile -t SHUFFLE_IDX < "$D/shuffle"
-        POS=0
+      build_shuffle_for "$MON"
+      mapfile -t SHUFFLE_IDX <"$D/shuffle"
+      POS=0
     fi
 
-    echo "$POS" > "$D/index"
+    echo "$POS" >"$D/index"
     log "Shuffle pos: $POS -> wall index: ${SHUFFLE_IDX[$POS]} on $MON"
     launch_on_monitor "${WALLS[${SHUFFLE_IDX[$POS]}]}" "$MON"
 
-else
+  else
 
     local IDX
     IDX=$(validate_index_for "$MON")
     log "Current index for $MON: $IDX"
     # Wrap around to 0 when reaching the end of the list
-    IDX=$(( (IDX + 1) % TOTAL ))
+    IDX=$(((IDX + 1) % TOTAL))
     log "Next index for $MON: $IDX"
-    echo "$IDX" > "$D/index"
+    echo "$IDX" >"$D/index"
     launch_on_monitor "${WALLS[$IDX]}" "$MON"
 
-fi
+  fi
 
-schedule_next_tick "$MON"
+  schedule_next_tick "$MON"
 
 }
 
@@ -545,55 +545,55 @@ schedule_next_tick "$MON"
 # wraps backwards using modular arithmetic to avoid negative indices.
 prev_wallpaper_for() {
 
-local MON="$1"
-local D
-D=$(mon_state_dir "$MON")
+  local MON="$1"
+  local D
+  D=$(mon_state_dir "$MON")
 
-log "prev_wallpaper_for: $MON"
+  log "prev_wallpaper_for: $MON"
 
-local MODE
-MODE=$(cat "$D/mode" 2>/dev/null || echo idle)
+  local MODE
+  MODE=$(cat "$D/mode" 2>/dev/null || echo idle)
 
-if [ "$MODE" = "playlist" ] || [ "$MODE" = "playlist_shuffle" ]; then
+  if [ "$MODE" = "playlist" ] || [ "$MODE" = "playlist_shuffle" ]; then
     local PL_NAME
     PL_NAME=$(cat "$D/playlist" 2>/dev/null)
     load_playlist_walls "$PL_NAME" || return 1
     if [ "$TOTAL" -eq 0 ]; then
-        log "prev_wallpaper_for $MON: playlist empty, stopping"
-        return 1
+      log "prev_wallpaper_for $MON: playlist empty, stopping"
+      return 1
     fi
-else
+  else
     load_walls
-fi
+  fi
 
-if [ "$MODE" = "shuffle" ] || [ "$MODE" = "playlist_shuffle" ]; then
+  if [ "$MODE" = "shuffle" ] || [ "$MODE" = "playlist_shuffle" ]; then
 
     local -a SHUFFLE_IDX
-    mapfile -t SHUFFLE_IDX < "$D/shuffle" 2>/dev/null
+    mapfile -t SHUFFLE_IDX <"$D/shuffle" 2>/dev/null
 
     local POS
     POS=$(cat "$D/index" 2>/dev/null || echo 0)
-    POS=$(( POS - 1 ))
-    [ "$POS" -lt 0 ] && POS=$(( ${#SHUFFLE_IDX[@]} - 1 ))
+    POS=$((POS - 1))
+    [ "$POS" -lt 0 ] && POS=$((${#SHUFFLE_IDX[@]} - 1))
 
-    echo "$POS" > "$D/index"
+    echo "$POS" >"$D/index"
     log "Shuffle pos: $POS -> wall index: ${SHUFFLE_IDX[$POS]} on $MON"
     launch_on_monitor "${WALLS[${SHUFFLE_IDX[$POS]}]}" "$MON"
 
-else
+  else
 
     local IDX
     IDX=$(validate_index_for "$MON")
     log "Current index for $MON: $IDX"
     # Add TOTAL before subtracting to avoid negative modulo
-    IDX=$(( (IDX - 1 + TOTAL) % TOTAL ))
+    IDX=$(((IDX - 1 + TOTAL) % TOTAL))
     log "Prev index for $MON: $IDX"
-    echo "$IDX" > "$D/index"
+    echo "$IDX" >"$D/index"
     launch_on_monitor "${WALLS[$IDX]}" "$MON"
 
-fi
+  fi
 
-schedule_next_tick "$MON"
+  schedule_next_tick "$MON"
 
 }
 
@@ -604,24 +604,24 @@ schedule_next_tick "$MON"
 # Pick a random wallpaper for a monitor. Resets mode to idle (one-shot).
 random_wallpaper_for() {
 
-local MON="$1"
-local D
-D=$(mon_state_dir "$MON")
+  local MON="$1"
+  local D
+  D=$(mon_state_dir "$MON")
 
-log "random_wallpaper_for: $MON"
+  log "random_wallpaper_for: $MON"
 
-echo "idle" > "$D/mode"
-rm -f "$D/next_tick"
+  echo "idle" >"$D/mode"
+  rm -f "$D/next_tick"
 
-load_walls
+  load_walls
 
-local IDX
-IDX=$(( RANDOM % TOTAL ))
+  local IDX
+  IDX=$((RANDOM % TOTAL))
 
-log "Random index for $MON: $IDX"
+  log "Random index for $MON: $IDX"
 
-echo "$IDX" > "$D/index"
-launch_on_monitor "${WALLS[$IDX]}" "$MON"
+  echo "$IDX" >"$D/index"
+  launch_on_monitor "${WALLS[$IDX]}" "$MON"
 
 }
 
@@ -632,18 +632,18 @@ launch_on_monitor "${WALLS[$IDX]}" "$MON"
 # Begin sequential cycling on a monitor at the configured interval.
 start_cycle_for() {
 
-local MON="$1"
-local D
-D=$(mon_state_dir "$MON")
+  local MON="$1"
+  local D
+  D=$(mon_state_dir "$MON")
 
-local INTERVAL
-INTERVAL=$(cat "$CYCLE_FILE" 2>/dev/null || echo 300)
+  local INTERVAL
+  INTERVAL=$(cat "$CYCLE_FILE" 2>/dev/null || echo 300)
 
-log "start_cycle_for $MON interval=$INTERVAL"
+  log "start_cycle_for $MON interval=$INTERVAL"
 
-echo "cycle" > "$D/mode"
+  echo "cycle" >"$D/mode"
 
-next_wallpaper_for "$MON"
+  next_wallpaper_for "$MON"
 
 }
 
@@ -655,23 +655,23 @@ next_wallpaper_for "$MON"
 # Index starts at -1 so the first next_wallpaper_for call lands on position 0.
 start_shuffle_for() {
 
-local MON="$1"
-local D
-D=$(mon_state_dir "$MON")
+  local MON="$1"
+  local D
+  D=$(mon_state_dir "$MON")
 
-local INTERVAL
-INTERVAL=$(cat "$CYCLE_FILE" 2>/dev/null || echo 300)
+  local INTERVAL
+  INTERVAL=$(cat "$CYCLE_FILE" 2>/dev/null || echo 300)
 
-log "start_shuffle_for $MON interval=$INTERVAL"
+  log "start_shuffle_for $MON interval=$INTERVAL"
 
-echo "shuffle" > "$D/mode"
+  echo "shuffle" >"$D/mode"
 
-load_walls
-build_shuffle_for "$MON"
+  load_walls
+  build_shuffle_for "$MON"
 
-echo "-1" > "$D/index"
+  echo "-1" >"$D/index"
 
-next_wallpaper_for "$MON"
+  next_wallpaper_for "$MON"
 
 }
 
@@ -682,32 +682,35 @@ next_wallpaper_for "$MON"
 # Begin ordered playlist playback on a monitor. Reads the playlist name from state.
 start_playlist_for() {
 
-local MON="$1"
-local D
-D=$(mon_state_dir "$MON")
+  local MON="$1"
+  local D
+  D=$(mon_state_dir "$MON")
 
-local NAME
-NAME=$(cat "$D/playlist" 2>/dev/null)
+  local NAME
+  NAME=$(cat "$D/playlist" 2>/dev/null)
 
-if [ -z "$NAME" ]; then
+  if [ -z "$NAME" ]; then
     log "start_playlist_for $MON: no playlist name in state"
     return 1
-fi
+  fi
 
-log "start_playlist_for $MON name=$NAME"
+  log "start_playlist_for $MON name=$NAME"
 
-echo "playlist" > "$D/mode"
-echo "-1"       > "$D/index"
+  echo "playlist" >"$D/mode"
+  echo "-1" >"$D/index"
 
-load_playlist_walls "$NAME" || { echo "idle" > "$D/mode"; return 1; }
-
-if [ "$TOTAL" -eq 0 ]; then
-    log "start_playlist_for $MON: playlist '$NAME' is empty"
-    echo "idle" > "$D/mode"
+  load_playlist_walls "$NAME" || {
+    echo "idle" >"$D/mode"
     return 1
-fi
+  }
 
-next_wallpaper_for "$MON"
+  if [ "$TOTAL" -eq 0 ]; then
+    log "start_playlist_for $MON: playlist '$NAME' is empty"
+    echo "idle" >"$D/mode"
+    return 1
+  fi
+
+  next_wallpaper_for "$MON"
 
 }
 
@@ -718,32 +721,32 @@ next_wallpaper_for "$MON"
 # Begin shuffled playlist playback on a monitor. Reads the playlist name from state.
 start_playlist_shuffle_for() {
 
-local MON="$1"
-local D
-D=$(mon_state_dir "$MON")
+  local MON="$1"
+  local D
+  D=$(mon_state_dir "$MON")
 
-local NAME
-NAME=$(cat "$D/playlist" 2>/dev/null)
+  local NAME
+  NAME=$(cat "$D/playlist" 2>/dev/null)
 
-if [ -z "$NAME" ]; then
+  if [ -z "$NAME" ]; then
     log "start_playlist_shuffle_for $MON: no playlist name in state"
     return 1
-fi
+  fi
 
-log "start_playlist_shuffle_for $MON name=$NAME"
+  log "start_playlist_shuffle_for $MON name=$NAME"
 
-load_playlist_walls "$NAME" || return 1
+  load_playlist_walls "$NAME" || return 1
 
-if [ "$TOTAL" -eq 0 ]; then
+  if [ "$TOTAL" -eq 0 ]; then
     log "start_playlist_shuffle_for $MON: playlist '$NAME' is empty"
     return 1
-fi
+  fi
 
-echo "playlist_shuffle" > "$D/mode"
-echo "-1"               > "$D/index"
-build_shuffle_for "$MON"
+  echo "playlist_shuffle" >"$D/mode"
+  echo "-1" >"$D/index"
+  build_shuffle_for "$MON"
 
-next_wallpaper_for "$MON"
+  next_wallpaper_for "$MON"
 
 }
 
@@ -754,39 +757,39 @@ next_wallpaper_for "$MON"
 # Launch a specific wallpaper by workshop ID. Sets mode to idle (no cycling).
 run_by_id() {
 
-local ID="$1"
-local MON_ARG="$2"
+  local ID="$1"
+  local MON_ARG="$2"
 
-log "run_by_id: $ID MON=${MON_ARG:-all}"
+  log "run_by_id: $ID MON=${MON_ARG:-all}"
 
-load_walls
+  load_walls
 
-local TARGET="$WORKSHOP_DIR/$ID"
+  local TARGET="$WORKSHOP_DIR/$ID"
 
-local FOUND_IDX=""
-local i
-for i in "${!WALLS[@]}"; do
+  local FOUND_IDX=""
+  local i
+  for i in "${!WALLS[@]}"; do
     if [ "${WALLS[$i]}" = "$TARGET" ]; then
-        FOUND_IDX=$i
-        break
+      FOUND_IDX=$i
+      break
     fi
-done
+  done
 
-local -a TARGET_MONS
-if [ -n "$MON_ARG" ]; then
+  local -a TARGET_MONS
+  if [ -n "$MON_ARG" ]; then
     TARGET_MONS=("$MON_ARG")
-else
+  else
     mapfile -t TARGET_MONS < <(get_monitors)
-fi
+  fi
 
-local MON D
-for MON in "${TARGET_MONS[@]}"; do
+  local MON D
+  for MON in "${TARGET_MONS[@]}"; do
     D=$(mon_state_dir "$MON")
-    [ -n "$FOUND_IDX" ] && echo "$FOUND_IDX" > "$D/index"
-    echo "idle" > "$D/mode"
+    [ -n "$FOUND_IDX" ] && echo "$FOUND_IDX" >"$D/index"
+    echo "idle" >"$D/mode"
     rm -f "$D/next_tick"
     launch_on_monitor "$TARGET" "$MON"
-done
+  done
 
 }
 
@@ -798,21 +801,21 @@ done
 # for commands (via CMD_FILE) and tick expirations every 0.5 seconds.
 daemon_loop() {
 
-echo $$ > "$PIDFILE"
+  echo $$ >"$PIDFILE"
 
-trap 'stop_wallpapers; rm -f "$PIDFILE"; exit' TERM INT
+  trap 'stop_wallpapers; rm -f "$PIDFILE"; exit' TERM INT
 
-if [ -f "$LOGFILE" ]; then
-    tail -n 1000 "$LOGFILE" > "$LOGFILE.tmp" && mv "$LOGFILE.tmp" "$LOGFILE"
-fi
+  if [ -f "$LOGFILE" ]; then
+    tail -n 1000 "$LOGFILE" >"$LOGFILE.tmp" && mv "$LOGFILE.tmp" "$LOGFILE"
+  fi
 
-log "Daemon started"
+  log "Daemon started"
 
-wait_for_steam
+  wait_for_steam
 
-# Restore wallpapers from saved state (e.g. after settings reload)
-shopt -s nullglob
-for _MON_PATH in "$MON_DIR"/*/; do
+  # Restore wallpapers from saved state (e.g. after settings reload)
+  shopt -s nullglob
+  for _MON_PATH in "$MON_DIR"/*/; do
     _MON_NAME=$(basename "$_MON_PATH")
     _CURRENT=$(cat "${_MON_PATH}current" 2>/dev/null)
     [ -z "$_CURRENT" ] && continue
@@ -821,18 +824,18 @@ for _MON_PATH in "$MON_DIR"/*/; do
     launch_on_monitor "$WORKSHOP_DIR/$_CURRENT" "$_MON_NAME"
     _MODE=$(cat "${_MON_PATH}mode" 2>/dev/null)
     case "$_MODE" in
-        cycle|shuffle|playlist|playlist_shuffle)
-            _EXISTING_TICK=$(cat "${_MON_PATH}next_tick" 2>/dev/null)
-            _NOW=$(date +%s)
-            if [ -z "$_EXISTING_TICK" ] || [ "$_NOW" -ge "$_EXISTING_TICK" ]; then
-                schedule_next_tick "$_MON_NAME"
-            fi
-            ;;
+    cycle | shuffle | playlist | playlist_shuffle)
+      _EXISTING_TICK=$(cat "${_MON_PATH}next_tick" 2>/dev/null)
+      _NOW=$(date +%s)
+      if [ -z "$_EXISTING_TICK" ] || [ "$_NOW" -ge "$_EXISTING_TICK" ]; then
+        schedule_next_tick "$_MON_NAME"
+      fi
+      ;;
     esac
-done
-shopt -u nullglob
+  done
+  shopt -u nullglob
 
-while true; do
+  while true; do
 
     ################################
     # COMMAND HANDLING
@@ -840,75 +843,84 @@ while true; do
 
     if [ -f "$CMD_FILE" ]; then
 
-        local CMD MON_ARG
-        read -r CMD MON_ARG < "$CMD_FILE"
-        rm "$CMD_FILE"
+      local CMD MON_ARG
+      read -r CMD MON_ARG <"$CMD_FILE"
+      rm "$CMD_FILE"
 
-        log "Command received: $CMD${MON_ARG:+ $MON_ARG}"
+      log "Command received: $CMD${MON_ARG:+ $MON_ARG}"
 
-        local -a TARGET_MONS
-        if [ -n "$MON_ARG" ]; then
-            TARGET_MONS=("$MON_ARG")
+      local -a TARGET_MONS
+      if [ -n "$MON_ARG" ]; then
+        TARGET_MONS=("$MON_ARG")
+      else
+        mapfile -t TARGET_MONS < <(get_monitors)
+      fi
+
+      local MON
+      case "$CMD" in
+      random)
+        for MON in "${TARGET_MONS[@]}"; do random_wallpaper_for "$MON"; done
+        ;;
+      next)
+        for MON in "${TARGET_MONS[@]}"; do next_wallpaper_for "$MON"; done
+        ;;
+      prev)
+        for MON in "${TARGET_MONS[@]}"; do prev_wallpaper_for "$MON"; done
+        ;;
+      cycle)
+        for MON in "${TARGET_MONS[@]}"; do start_cycle_for "$MON"; done
+        ;;
+      shuffle)
+        for MON in "${TARGET_MONS[@]}"; do start_shuffle_for "$MON"; done
+        ;;
+      stop)
+        for MON in "${TARGET_MONS[@]}"; do stop_monitor "$MON"; done
+        ;;
+      run)
+        # MON_ARG contains "ID" or "ID MONITOR"
+        # shellcheck disable=SC2086
+        run_by_id $MON_ARG
+        ;;
+      playlist_play)
+        # MON_ARG = "PLAYLIST_NAME" or "PLAYLIST_NAME MONITOR"
+        # Split on first space; if no space, PL_MON equals PL_NAME (reset to "")
+        local PL_NAME PL_MON
+        PL_NAME="${MON_ARG%% *}"
+        PL_MON="${MON_ARG#* }"
+        [ "$PL_MON" = "$PL_NAME" ] && PL_MON=""
+        local -a PL_TARGET_MONS
+        if [ -n "$PL_MON" ]; then
+          PL_TARGET_MONS=("$PL_MON")
         else
-            mapfile -t TARGET_MONS < <(get_monitors)
+          mapfile -t PL_TARGET_MONS < <(get_monitors)
         fi
-
-        local MON
-        case "$CMD" in
-            random)
-                for MON in "${TARGET_MONS[@]}"; do random_wallpaper_for "$MON"; done ;;
-            next)
-                for MON in "${TARGET_MONS[@]}"; do next_wallpaper_for "$MON"; done ;;
-            prev)
-                for MON in "${TARGET_MONS[@]}"; do prev_wallpaper_for "$MON"; done ;;
-            cycle)
-                for MON in "${TARGET_MONS[@]}"; do start_cycle_for "$MON"; done ;;
-            shuffle)
-                for MON in "${TARGET_MONS[@]}"; do start_shuffle_for "$MON"; done ;;
-            stop)
-                for MON in "${TARGET_MONS[@]}"; do stop_monitor "$MON"; done ;;
-            run)
-                # MON_ARG contains "ID" or "ID MONITOR"
-                # shellcheck disable=SC2086
-                run_by_id $MON_ARG ;;
-            playlist_play)
-                # MON_ARG = "PLAYLIST_NAME" or "PLAYLIST_NAME MONITOR"
-                # Split on first space; if no space, PL_MON equals PL_NAME (reset to "")
-                local PL_NAME PL_MON
-                PL_NAME="${MON_ARG%% *}"
-                PL_MON="${MON_ARG#* }"
-                [ "$PL_MON" = "$PL_NAME" ] && PL_MON=""
-                local -a PL_TARGET_MONS
-                if [ -n "$PL_MON" ]; then
-                    PL_TARGET_MONS=("$PL_MON")
-                else
-                    mapfile -t PL_TARGET_MONS < <(get_monitors)
-                fi
-                for MON in "${PL_TARGET_MONS[@]}"; do
-                    local _D
-                    _D=$(mon_state_dir "$MON")
-                    echo "$PL_NAME" > "$_D/playlist"
-                    start_playlist_for "$MON"
-                done ;;
-            playlist_shuffle)
-                # MON_ARG = "PLAYLIST_NAME" or "PLAYLIST_NAME MONITOR"
-                local PL_NAME PL_MON
-                PL_NAME="${MON_ARG%% *}"
-                PL_MON="${MON_ARG#* }"
-                [ "$PL_MON" = "$PL_NAME" ] && PL_MON=""
-                local -a PL_TARGET_MONS
-                if [ -n "$PL_MON" ]; then
-                    PL_TARGET_MONS=("$PL_MON")
-                else
-                    mapfile -t PL_TARGET_MONS < <(get_monitors)
-                fi
-                for MON in "${PL_TARGET_MONS[@]}"; do
-                    local _D
-                    _D=$(mon_state_dir "$MON")
-                    echo "$PL_NAME" > "$_D/playlist"
-                    start_playlist_shuffle_for "$MON"
-                done ;;
-        esac
+        for MON in "${PL_TARGET_MONS[@]}"; do
+          local _D
+          _D=$(mon_state_dir "$MON")
+          echo "$PL_NAME" >"$_D/playlist"
+          start_playlist_for "$MON"
+        done
+        ;;
+      playlist_shuffle)
+        # MON_ARG = "PLAYLIST_NAME" or "PLAYLIST_NAME MONITOR"
+        local PL_NAME PL_MON
+        PL_NAME="${MON_ARG%% *}"
+        PL_MON="${MON_ARG#* }"
+        [ "$PL_MON" = "$PL_NAME" ] && PL_MON=""
+        local -a PL_TARGET_MONS
+        if [ -n "$PL_MON" ]; then
+          PL_TARGET_MONS=("$PL_MON")
+        else
+          mapfile -t PL_TARGET_MONS < <(get_monitors)
+        fi
+        for MON in "${PL_TARGET_MONS[@]}"; do
+          local _D
+          _D=$(mon_state_dir "$MON")
+          echo "$PL_NAME" >"$_D/playlist"
+          start_playlist_shuffle_for "$MON"
+        done
+        ;;
+      esac
 
     fi
 
@@ -922,28 +934,28 @@ while true; do
     shopt -s nullglob
     local MON_PATH
     for MON_PATH in "$MON_DIR"/*/; do
-        local MON_NAME
-        MON_NAME=$(basename "$MON_PATH")
+      local MON_NAME
+      MON_NAME=$(basename "$MON_PATH")
 
-        local MODE
-        MODE=$(cat "${MON_PATH}mode" 2>/dev/null)
-        [ "$MODE" = "cycle" ] || [ "$MODE" = "shuffle" ] \
-            || [ "$MODE" = "playlist" ] || [ "$MODE" = "playlist_shuffle" ] || continue
+      local MODE
+      MODE=$(cat "${MON_PATH}mode" 2>/dev/null)
+      [ "$MODE" = "cycle" ] || [ "$MODE" = "shuffle" ] ||
+        [ "$MODE" = "playlist" ] || [ "$MODE" = "playlist_shuffle" ] || continue
 
-        local TICK
-        TICK=$(cat "${MON_PATH}next_tick" 2>/dev/null)
-        [ -z "$TICK" ] && continue
+      local TICK
+      TICK=$(cat "${MON_PATH}next_tick" 2>/dev/null)
+      [ -z "$TICK" ] && continue
 
-        if [ "$NOW" -ge "$TICK" ]; then
-            log "Tick expired for $MON_NAME"
-            next_wallpaper_for "$MON_NAME"
-        fi
+      if [ "$NOW" -ge "$TICK" ]; then
+        log "Tick expired for $MON_NAME"
+        next_wallpaper_for "$MON_NAME"
+      fi
     done
     shopt -u nullglob
 
     sleep 0.5
 
-done
+  done
 
 }
 
@@ -955,29 +967,29 @@ done
 # Starts the daemon automatically if it is not running.
 send_cmd() {
 
-local CMD="$1"
-local MON="${2:-}"
+  local CMD="$1"
+  local MON="${2:-}"
 
-log "send_cmd: $CMD${MON:+ $MON}"
+  log "send_cmd: $CMD${MON:+ $MON}"
 
-if ! is_running; then
+  if ! is_running; then
     log "Daemon not running, starting"
     "$0" start
     sleep 1
-fi
+  fi
 
-printf "%s\n" "$CMD${MON:+ $MON}" > "$CMD_FILE"
+  printf "%s\n" "$CMD${MON:+ $MON}" >"$CMD_FILE"
 
 }
 
 # Convenience wrapper: send a playlist_play command with name and optional monitor.
 send_playlist_play_cmd() {
-    send_cmd "playlist_play" "$1${2:+ $2}"
+  send_cmd "playlist_play" "$1${2:+ $2}"
 }
 
 # Convenience wrapper: send a playlist_shuffle command with name and optional monitor.
 send_playlist_shuffle_cmd() {
-    send_cmd "playlist_shuffle" "$1${2:+ $2}"
+  send_cmd "playlist_shuffle" "$1${2:+ $2}"
 }
 
 ########################################
@@ -987,185 +999,185 @@ send_playlist_shuffle_cmd() {
 case "$1" in
 
 daemon)
-    daemon_loop
-;;
+  daemon_loop
+  ;;
 
 start)
 
-if is_running; then
+  if is_running; then
     exit 0
-fi
+  fi
 
-log "Starting daemon"
+  log "Starting daemon"
 
-nohup "$0" daemon >/dev/null 2>&1 &
-;;
+  nohup "$0" daemon >/dev/null 2>&1 &
+  ;;
 
 reload)
 
-if is_running; then
+  if is_running; then
     kill "$(cat "$PIDFILE")" 2>/dev/null
     rm -f "$PIDFILE"
     sleep 0.5
-fi
+  fi
 
-log "Reloading daemon"
+  log "Reloading daemon"
 
-nohup "$0" daemon >/dev/null 2>&1 &
-;;
+  nohup "$0" daemon >/dev/null 2>&1 &
+  ;;
 
 random)
-    send_cmd random "${2:-}"
-;;
+  send_cmd random "${2:-}"
+  ;;
 
 next)
-    send_cmd next "${2:-}"
-;;
+  send_cmd next "${2:-}"
+  ;;
 
 prev)
-    send_cmd prev "${2:-}"
-;;
+  send_cmd prev "${2:-}"
+  ;;
 
 cycle)
-    echo "${2:-300}" > "$CYCLE_FILE"
-    log "cycle command interval=${2:-300}"
-    send_cmd cycle "${3:-}"
-;;
+  echo "${2:-300}" >"$CYCLE_FILE"
+  log "cycle command interval=${2:-300}"
+  send_cmd cycle "${3:-}"
+  ;;
 
 shuffle)
-    echo "${2:-300}" > "$CYCLE_FILE"
-    log "shuffle command interval=${2:-300}"
-    send_cmd shuffle "${3:-}"
-;;
+  echo "${2:-300}" >"$CYCLE_FILE"
+  log "shuffle command interval=${2:-300}"
+  send_cmd shuffle "${3:-}"
+  ;;
 
 stop)
-    if [ -n "${2:-}" ]; then
-        stop_monitor "$2"
-    else
-        stop_wallpapers
-        if is_running; then
-            kill "$(cat "$PIDFILE")" 2>/dev/null
-            rm -f "$PIDFILE"
-            log "Daemon stopped"
-        fi
+  if [ -n "${2:-}" ]; then
+    stop_monitor "$2"
+  else
+    stop_wallpapers
+    if is_running; then
+      kill "$(cat "$PIDFILE")" 2>/dev/null
+      rm -f "$PIDFILE"
+      log "Daemon stopped"
     fi
-;;
+  fi
+  ;;
 
 list)
 
-wait_for_steam
+  wait_for_steam
 
-ensure_cache
+  ensure_cache
 
-declare -A CURRENT_IDS
-shopt -s nullglob
-for MON_PATH in "$MON_DIR"/*/; do
+  declare -A CURRENT_IDS
+  shopt -s nullglob
+  for MON_PATH in "$MON_DIR"/*/; do
     if [ -f "${MON_PATH}current" ]; then
-        CURRENT_IDS["$(cat "${MON_PATH}current")"]=1
+      CURRENT_IDS["$(cat "${MON_PATH}current")"]=1
     fi
-done
-shopt -u nullglob
+  done
+  shopt -u nullglob
 
-while IFS=$'\t' read -r ID TITLE TAGS TYPE DESC; do
+  while IFS=$'\t' read -r ID TITLE TAGS TYPE DESC; do
     MARKER=" "
     [ "${CURRENT_IDS[$ID]+_}" ] && MARKER="*"
     printf "%s\t%s\t%s\t%s\t%s\t%s\n" "$MARKER" "$ID" "$TITLE" "$TAGS" "$TYPE" "$DESC"
-done < "$CACHE_FILE"
-;;
+  done <"$CACHE_FILE"
+  ;;
 
 status)
 
-load_walls
+  load_walls
 
-is_running \
-    && echo "daemon:  running (pid $(cat "$PIDFILE"))" \
-    || echo "daemon:  stopped"
-echo
+  is_running &&
+    echo "daemon:  running (pid $(cat "$PIDFILE"))" ||
+    echo "daemon:  stopped"
+  echo
 
-declare -A ACTIVE_MONS
-while IFS= read -r m; do ACTIVE_MONS["$m"]=1; done < <(get_monitors)
+  declare -A ACTIVE_MONS
+  while IFS= read -r m; do ACTIVE_MONS["$m"]=1; done < <(get_monitors)
 
-shopt -s nullglob
-for MON_PATH in "$MON_DIR"/*/; do
+  shopt -s nullglob
+  for MON_PATH in "$MON_DIR"/*/; do
     MON_NAME=$(basename "$MON_PATH")
 
     [ "${ACTIVE_MONS[$MON_NAME]+_}" ] || continue
 
-    MODE=$(cat "${MON_PATH}mode"      2>/dev/null || echo "idle")
-    IDX=$(cat  "${MON_PATH}index"     2>/dev/null || echo "?")
-    CUR=$(cat  "${MON_PATH}current"   2>/dev/null)
+    MODE=$(cat "${MON_PATH}mode" 2>/dev/null || echo "idle")
+    IDX=$(cat "${MON_PATH}index" 2>/dev/null || echo "?")
+    CUR=$(cat "${MON_PATH}current" 2>/dev/null)
     TICK=$(cat "${MON_PATH}next_tick" 2>/dev/null)
 
     echo "monitor: $MON_NAME"
 
-    if [ "$MODE" = "cycle" ] || [ "$MODE" = "shuffle" ] \
-       || [ "$MODE" = "playlist" ] || [ "$MODE" = "playlist_shuffle" ]; then
-        INTERVAL=$(cat "$CYCLE_FILE" 2>/dev/null || echo 300)
-        PL_SUFFIX=""
-        if [ "$MODE" = "playlist" ] || [ "$MODE" = "playlist_shuffle" ]; then
-            PL_NAME=$(cat "${MON_PATH}playlist" 2>/dev/null)
-            PL_SUFFIX=" [playlist: $PL_NAME]"
+    if [ "$MODE" = "cycle" ] || [ "$MODE" = "shuffle" ] ||
+      [ "$MODE" = "playlist" ] || [ "$MODE" = "playlist_shuffle" ]; then
+      INTERVAL=$(cat "$CYCLE_FILE" 2>/dev/null || echo 300)
+      PL_SUFFIX=""
+      if [ "$MODE" = "playlist" ] || [ "$MODE" = "playlist_shuffle" ]; then
+        PL_NAME=$(cat "${MON_PATH}playlist" 2>/dev/null)
+        PL_SUFFIX=" [playlist: $PL_NAME]"
+      fi
+      echo "  mode:    $MODE${PL_SUFFIX} (${INTERVAL}s)"
+      if [ -n "$TICK" ]; then
+        REMAINING=$((TICK - $(date +%s)))
+        if [ "$REMAINING" -ge 60 ]; then
+          echo "  next in: $((REMAINING / 60))m $((REMAINING % 60))s"
+        else
+          echo "  next in: ${REMAINING}s"
         fi
-        echo "  mode:    $MODE${PL_SUFFIX} (${INTERVAL}s)"
-        if [ -n "$TICK" ]; then
-            REMAINING=$(( TICK - $(date +%s) ))
-            if [ "$REMAINING" -ge 60 ]; then
-                echo "  next in: $(( REMAINING / 60 ))m $(( REMAINING % 60 ))s"
-            else
-                echo "  next in: ${REMAINING}s"
-            fi
-        fi
+      fi
     else
-        echo "  mode:    $MODE"
+      echo "  mode:    $MODE"
     fi
 
     if [ "$IDX" != "?" ] && [ -n "${WALLS[$IDX]:-}" ]; then
-        echo "  current: $(jq -r '.title' "${WALLS[$IDX]}/project.json")"
-        echo "  id:      $CUR"
-        echo "  index:   $IDX / $(( TOTAL - 1 ))"
+      echo "  current: $(jq -r '.title' "${WALLS[$IDX]}/project.json")"
+      echo "  id:      $CUR"
+      echo "  index:   $IDX / $((TOTAL - 1))"
     fi
 
     echo
-done
-shopt -u nullglob
-;;
+  done
+  shopt -u nullglob
+  ;;
 
 monitors)
-    get_monitors
-;;
+  get_monitors
+  ;;
 
 info)
-    INFO_ID="${2:-}"
-    if [ -z "$INFO_ID" ]; then
-        echo "Usage: wall info <id>" >&2
-        exit 1
+  INFO_ID="${2:-}"
+  if [ -z "$INFO_ID" ]; then
+    echo "Usage: wall info <id>" >&2
+    exit 1
+  fi
+  INFO_DIR="$WORKSHOP_DIR/$INFO_ID"
+  if [ ! -f "$INFO_DIR/project.json" ]; then
+    echo "{}" >&2
+    exit 1
+  fi
+  INFO_THUMB=""
+  for f in preview.mp4 preview.webm preview.gif preview.jpg preview.png; do
+    if [ -f "$INFO_DIR/$f" ]; then
+      INFO_THUMB="$INFO_DIR/$f"
+      break
     fi
-    INFO_DIR="$WORKSHOP_DIR/$INFO_ID"
-    if [ ! -f "$INFO_DIR/project.json" ]; then
-        echo "{}" >&2
-        exit 1
-    fi
-    INFO_THUMB=""
-    for f in preview.mp4 preview.webm preview.gif preview.jpg preview.png; do
-        if [ -f "$INFO_DIR/$f" ]; then
-            INFO_THUMB="$INFO_DIR/$f"
-            break
-        fi
-    done
-    INFO_TYPE=$(jq -r '.type // ""' "$INFO_DIR/project.json")
-    INFO_FILE=$(jq -r '.file // ""' "$INFO_DIR/project.json")
-    INFO_VIDEO="{}"
-    if [ "$INFO_TYPE" = "video" ] && [ -n "$INFO_FILE" ] && [ -f "$INFO_DIR/$INFO_FILE" ]; then
-        INFO_VIDEO=$(ffprobe -v quiet -print_format json -show_streams "$INFO_DIR/$INFO_FILE" 2>/dev/null \
-            | jq -c 'first(.streams[] | select(.codec_type == "video")) | {
+  done
+  INFO_TYPE=$(jq -r '.type // ""' "$INFO_DIR/project.json")
+  INFO_FILE=$(jq -r '.file // ""' "$INFO_DIR/project.json")
+  INFO_VIDEO="{}"
+  if [ "$INFO_TYPE" = "video" ] && [ -n "$INFO_FILE" ] && [ -f "$INFO_DIR/$INFO_FILE" ]; then
+    INFO_VIDEO=$(ffprobe -v quiet -print_format json -show_streams "$INFO_DIR/$INFO_FILE" 2>/dev/null |
+      jq -c 'first(.streams[] | select(.codec_type == "video")) | {
                 width,
                 height,
                 fps: (.r_frame_rate | split("/") | (.[0] | tonumber) / (.[1] | tonumber)),
                 duration: (.duration | tonumber),
                 codec: .codec_name
             }' 2>/dev/null || echo "{}")
-    fi
-    INFO_PROPS=$(jq -c '[
+  fi
+  INFO_PROPS=$(jq -c '[
         (.general.properties // .properties // {}) | to_entries[]
         | .key as $pkey
         | select(.value.type != null and .value.type != "group"
@@ -1182,58 +1194,58 @@ info)
             options: (.value.options // null)
         }
     ] | sort_by(.order) | map(del(.order))' "$INFO_DIR/project.json" 2>/dev/null || echo "[]")
-    INFO_TYPE_RAW=$(jq -r '.type // ""' "$INFO_DIR/project.json")
-    INFO_WARNINGS="[]"
-    INFO_UNSUPPORTED="false"
-    if [ "$INFO_TYPE_RAW" = "scene" ]; then
-        mkdir -p "$CHECKS_DIR"
-        CHECK_FILE="$CHECKS_DIR/$INFO_ID"
-        if [ ! -f "$CHECK_FILE" ]; then
-            DUMP_OUT=$(env -u DISPLAY -u WAYLAND_DISPLAY \
-                timeout 1 "$ENGINE_BIN" \
-                --assets-dir "$ASSETS" --dump-structure "$INFO_DIR" 2>&1 || true)
-            WARN_ITEMS=""
-            if echo "$DUMP_OUT" | grep -q "Text objects are not supported"; then
-                WARN_ITEMS="\"Text and clock layers will not be rendered\""
-            fi
-            if [ -n "$WARN_ITEMS" ]; then
-                INFO_WARNINGS="[$WARN_ITEMS]"
-            fi
-            echo "$INFO_WARNINGS" > "$CHECK_FILE"
-        else
-            INFO_WARNINGS=$(cat "$CHECK_FILE")
-        fi
-        # Always append the general scene caveat
-        INFO_WARNINGS=$(printf '%s' "$INFO_WARNINGS" | jq '. + ["Some scene features may not be fully supported yet"]')
-    elif [ "$INFO_TYPE_RAW" = "web" ] || [ "$INFO_TYPE_RAW" = "application" ]; then
-        INFO_UNSUPPORTED="true"
+  INFO_TYPE_RAW=$(jq -r '.type // ""' "$INFO_DIR/project.json")
+  INFO_WARNINGS="[]"
+  INFO_UNSUPPORTED="false"
+  if [ "$INFO_TYPE_RAW" = "scene" ]; then
+    mkdir -p "$CHECKS_DIR"
+    CHECK_FILE="$CHECKS_DIR/$INFO_ID"
+    if [ ! -f "$CHECK_FILE" ]; then
+      DUMP_OUT=$(env -u DISPLAY -u WAYLAND_DISPLAY \
+        timeout 1 "$ENGINE_BIN" \
+        --assets-dir "$ASSETS" --dump-structure "$INFO_DIR" 2>&1 || true)
+      WARN_ITEMS=""
+      if echo "$DUMP_OUT" | grep -q "Text objects are not supported"; then
+        WARN_ITEMS="\"Text and clock layers will not be rendered\""
+      fi
+      if [ -n "$WARN_ITEMS" ]; then
+        INFO_WARNINGS="[$WARN_ITEMS]"
+      fi
+      echo "$INFO_WARNINGS" >"$CHECK_FILE"
+    else
+      INFO_WARNINGS=$(cat "$CHECK_FILE")
     fi
-    jq --arg id "$INFO_ID" --arg thumb "$INFO_THUMB" \
-        --argjson video "$INFO_VIDEO" \
-        --argjson props "$INFO_PROPS" \
-        --argjson warnings "$INFO_WARNINGS" \
-        --argjson unsupported "$INFO_UNSUPPORTED" \
-        --argjson excluded "$(grep -qxF "$INFO_ID" "$EXCLUDED_FILE" 2>/dev/null && echo true || echo false)" \
-        '. + {id: $id, thumbnail: $thumb, excluded: $excluded}
+    # Always append the general scene caveat
+    INFO_WARNINGS=$(printf '%s' "$INFO_WARNINGS" | jq '. + ["Some scene features may not be fully supported yet"]')
+  elif [ "$INFO_TYPE_RAW" = "web" ] || [ "$INFO_TYPE_RAW" = "application" ]; then
+    INFO_UNSUPPORTED="true"
+  fi
+  jq --arg id "$INFO_ID" --arg thumb "$INFO_THUMB" \
+    --argjson video "$INFO_VIDEO" \
+    --argjson props "$INFO_PROPS" \
+    --argjson warnings "$INFO_WARNINGS" \
+    --argjson unsupported "$INFO_UNSUPPORTED" \
+    --argjson excluded "$(grep -qxF "$INFO_ID" "$EXCLUDED_FILE" 2>/dev/null && echo true || echo false)" \
+    '. + {id: $id, thumbnail: $thumb, excluded: $excluded}
           + (if $video != {} then {video: $video} else {} end)
           + (if ($props | length) > 0 then {properties: $props} else {} end)
           + (if ($warnings | length) > 0 then {warnings: $warnings} else {} end)
           + (if $unsupported then {unsupported: true} else {} end)' \
-        "$INFO_DIR/project.json"
-;;
+    "$INFO_DIR/project.json"
+  ;;
 
 props)
-    PROPS_Q_ID="${2:-}"
-    if [ -z "$PROPS_Q_ID" ]; then
-        echo "Usage: wall props <id>" >&2
-        exit 1
-    fi
-    PROPS_Q_DIR="$WORKSHOP_DIR/$PROPS_Q_ID"
-    if [ ! -f "$PROPS_Q_DIR/project.json" ]; then
-        echo "[]"
-        exit 0
-    fi
-    jq -c '[
+  PROPS_Q_ID="${2:-}"
+  if [ -z "$PROPS_Q_ID" ]; then
+    echo "Usage: wall props <id>" >&2
+    exit 1
+  fi
+  PROPS_Q_DIR="$WORKSHOP_DIR/$PROPS_Q_ID"
+  if [ ! -f "$PROPS_Q_DIR/project.json" ]; then
+    echo "[]"
+    exit 0
+  fi
+  jq -c '[
         (.general.properties // .properties // {}) | to_entries[]
         | .key as $pkey
         | select(.value.type != null and .value.type != "group"
@@ -1250,499 +1262,540 @@ props)
             options: (.value.options // null)
         }
     ] | sort_by(.order) | map(del(.order))' "$PROPS_Q_DIR/project.json" 2>/dev/null || echo "[]"
-;;
+  ;;
 
 prop)
-    case "${2:-}" in
-        set)
-            PROP_SET_ID="${3:-}"
-            PROP_SET_KV="${4:-}"
-            if [ -z "$PROP_SET_ID" ] || [ -z "$PROP_SET_KV" ]; then
-                echo "Usage: wall prop set <id> <key>=<value>" >&2
-                exit 1
-            fi
-            PROP_KEY="${PROP_SET_KV%%=*}"
-            PROP_VAL="${PROP_SET_KV#*=}"
-            mkdir -p "$PROPS_DIR"
-            PROP_FILE="$PROPS_DIR/$PROP_SET_ID"
-            if grep -q "^${PROP_KEY}=" "$PROP_FILE" 2>/dev/null; then
-                sed -i "s|^${PROP_KEY}=.*|${PROP_KEY}=${PROP_VAL}|" "$PROP_FILE"
-            else
-                echo "${PROP_KEY}=${PROP_VAL}" >> "$PROP_FILE"
-            fi
-            # restart on any active monitor
-            shopt -s nullglob
-            for _MON_PATH in "$MON_DIR"/*/; do
-                if [ -f "${_MON_PATH}current" ] && [ "$(cat "${_MON_PATH}current")" = "$PROP_SET_ID" ]; then
-                    _MON_NAME=$(basename "$_MON_PATH")
-                    send_cmd "run" "$PROP_SET_ID $_MON_NAME"
-                fi
-            done
-            shopt -u nullglob
-            ;;
-        *)
-            echo "Usage: wall prop set <id> <key>=<value>" >&2
-            exit 1
-            ;;
-    esac
-;;
+  case "${2:-}" in
+  set)
+    PROP_SET_ID="${3:-}"
+    PROP_SET_KV="${4:-}"
+    if [ -z "$PROP_SET_ID" ] || [ -z "$PROP_SET_KV" ]; then
+      echo "Usage: wall prop set <id> <key>=<value>" >&2
+      exit 1
+    fi
+    PROP_KEY="${PROP_SET_KV%%=*}"
+    PROP_VAL="${PROP_SET_KV#*=}"
+    mkdir -p "$PROPS_DIR"
+    PROP_FILE="$PROPS_DIR/$PROP_SET_ID"
+    if grep -q "^${PROP_KEY}=" "$PROP_FILE" 2>/dev/null; then
+      sed -i "s|^${PROP_KEY}=.*|${PROP_KEY}=${PROP_VAL}|" "$PROP_FILE"
+    else
+      echo "${PROP_KEY}=${PROP_VAL}" >>"$PROP_FILE"
+    fi
+    # restart on any active monitor
+    shopt -s nullglob
+    for _MON_PATH in "$MON_DIR"/*/; do
+      if [ -f "${_MON_PATH}current" ] && [ "$(cat "${_MON_PATH}current")" = "$PROP_SET_ID" ]; then
+        _MON_NAME=$(basename "$_MON_PATH")
+        send_cmd "run" "$PROP_SET_ID $_MON_NAME"
+      fi
+    done
+    shopt -u nullglob
+    ;;
+  *)
+    echo "Usage: wall prop set <id> <key>=<value>" >&2
+    exit 1
+    ;;
+  esac
+  ;;
 
 version)
-    _SHOW_ALL=false
-    for _arg in "${@:2}"; do
-        case "$_arg" in --all) _SHOW_ALL=true ;; esac
-    done
+  _SHOW_ALL=false
+  for _arg in "${@:2}"; do
+    case "$_arg" in --all) _SHOW_ALL=true ;; esac
+  done
 
-    echo "wall $VERSION"
+  echo "wall $VERSION"
 
-    _CHANGELOG_URL="https://raw.githubusercontent.com/bbetter/wall/main/CHANGELOG.md"
-    _CHANGELOG=$(curl -sf "$_CHANGELOG_URL" 2>/dev/null)
-    if [ -z "$_CHANGELOG" ]; then
-        echo "(could not fetch release notes)"
-        exit 0
-    fi
+  _CHANGELOG_URL="https://raw.githubusercontent.com/bbetter/wall/main/CHANGELOG.md"
+  _CHANGELOG=$(curl -sf "$_CHANGELOG_URL" 2>/dev/null)
+  if [ -z "$_CHANGELOG" ]; then
+    echo "(could not fetch release notes)"
+    exit 0
+  fi
 
-    echo ""
-    if [ "$_SHOW_ALL" = true ]; then
-        echo "$_CHANGELOG" | sed 's/^# Changelog//' | sed '/^[[:space:]]*$/{ N; /^\n[[:space:]]*$/d; }'
-    else
-        echo "$_CHANGELOG" \
-            | sed -n "/^## v${VERSION}$/,/^## v/{ /^## v${VERSION}$/d; /^## v[0-9]/d; p; }" \
-            | sed '/^[[:space:]]*$/{ 1d; }' \
-            | sed -e 's/^- /  • /'
-    fi
-;;
+  echo ""
+  if [ "$_SHOW_ALL" = true ]; then
+    echo "$_CHANGELOG" | sed 's/^# Changelog//' | sed '/^[[:space:]]*$/{ N; /^\n[[:space:]]*$/d; }'
+  else
+    echo "$_CHANGELOG" |
+      sed -n "/^## v${VERSION}$/,/^## v/{ /^## v${VERSION}$/d; /^## v[0-9]/d; p; }" |
+      sed '/^[[:space:]]*$/{ 1d; }' |
+      sed -e 's/^- /  • /'
+  fi
+  ;;
 
 use-engine)
-    _ENGINE_DEST="$HOME/.local/bin/wall-engine"
-    _ENGINE_REPO="bbetter/linux-wallpaperengine"
-    _MODE="${2:-}"
+  _ENGINE_DEST="$HOME/.local/bin/wall-engine"
+  _ENGINE_REPO="bbetter/linux-wallpaperengine"
+  _MODE="${2:-}"
 
-    case "$_MODE" in
-        fork)
-            echo "Fetching latest engine release..."
-            _ENGINE_RELEASE=$(curl -s "https://api.github.com/repos/$_ENGINE_REPO/releases/latest")
-            _ENGINE_TAG=$(echo "$_ENGINE_RELEASE" | jq -r '.tag_name // empty')
-            if [ -z "$_ENGINE_TAG" ]; then
-                echo "Error: could not fetch engine release from GitHub"
-                exit 1
-            fi
-            _ENGINE_URL=$(echo "$_ENGINE_RELEASE" | jq -r '.assets[] | select(.name == "linux-wallpaperengine") | .browser_download_url')
-            if [ -z "$_ENGINE_URL" ]; then
-                echo "Error: binary asset not found in release $_ENGINE_TAG"
-                echo "Make sure a release exists at github.com/$_ENGINE_REPO/releases"
-                exit 1
-            fi
-            echo "Downloading engine $_ENGINE_TAG..."
-            curl -sL "$_ENGINE_URL" -o "$_ENGINE_DEST.tmp"
-            chmod +x "$_ENGINE_DEST.tmp"
-            mv "$_ENGINE_DEST.tmp" "$_ENGINE_DEST"
-            echo "  Installed to $_ENGINE_DEST"
-
-            mkdir -p "$(dirname "$CONFIG_FILE")"
-            if grep -q "^ENGINE_BIN=" "$CONFIG_FILE" 2>/dev/null; then
-                sed -i "s|^ENGINE_BIN=.*|ENGINE_BIN=$_ENGINE_DEST|" "$CONFIG_FILE"
-            else
-                echo "ENGINE_BIN=$_ENGINE_DEST" >> "$CONFIG_FILE"
-            fi
-            echo "  Switched to fork engine ($_ENGINE_TAG)"
-            is_running && echo "  Restart to apply: wall reload" || true
-            ;;
-
-        system)
-            sed -i '/^ENGINE_BIN=/d' "$CONFIG_FILE" 2>/dev/null || true
-            echo "Switched to system engine (linux-wallpaperengine)"
-            is_running && echo "  Restart to apply: wall reload" || true
-            ;;
-
-        *)
-            echo "Current engine: $ENGINE_BIN"
-            echo ""
-            echo "Usage: wall use-engine <fork|system>"
-            echo "  fork    — download and use bbetter/linux-wallpaperengine"
-            echo "  system  — use system-installed linux-wallpaperengine (default)"
-            ;;
-    esac
-;;
-
-update)
-    _FORCE=false
-    _WHATSNEW=false
-    for _arg in "${@:2}"; do
-        case "$_arg" in
-            --force|--fresh) _FORCE=true ;;
-            --whatsnew)      _WHATSNEW=true ;;
-        esac
-    done
-
-    echo "Checking for updates..."
-    LATEST_TAG=$(curl -s "https://api.github.com/repos/bbetter/wall/releases/latest" \
-        | jq -r '.tag_name // empty')
-    if [ -z "$LATEST_TAG" ]; then
-        echo "Error: could not fetch release info from GitHub"
-        exit 1
+  case "$_MODE" in
+  fork)
+    echo "Fetching latest engine release..."
+    _ENGINE_RELEASE=$(curl -s "https://api.github.com/repos/$_ENGINE_REPO/releases/latest")
+    _ENGINE_TAG=$(echo "$_ENGINE_RELEASE" | jq -r '.tag_name // empty')
+    if [ -z "$_ENGINE_TAG" ]; then
+      echo "Error: could not fetch engine release from GitHub"
+      exit 1
     fi
-    LATEST_VER="${LATEST_TAG#v}"
-
-    _print_whats_new() {
-        local _ver="$1" _tag="$2"
-        local _cl
-        _cl=$(curl -sf "https://raw.githubusercontent.com/bbetter/wall/$_tag/CHANGELOG.md" 2>/dev/null)
-        if [ -n "$_cl" ]; then
-            echo ""
-            echo "What's new in v${_ver}:"
-            echo "$_cl" \
-                | sed -n "/^## v${_ver}$/,/^## v/{ /^## v${_ver}$/d; /^## v[0-9]/d; p; }" \
-                | sed '/^[[:space:]]*$/{ 1d; }' \
-                | sed 's/^- /  • /'
-        fi
-    }
-
-    if [ "$_WHATSNEW" = true ]; then
-        if [ "$LATEST_VER" = "$VERSION" ]; then
-            echo "You are already on the latest version (v$VERSION)."
-        else
-            echo "v$VERSION → v$LATEST_VER available"
-            _print_whats_new "$LATEST_VER" "$LATEST_TAG"
-        fi
-        exit 0
+    _ENGINE_URL=$(echo "$_ENGINE_RELEASE" | jq -r '.assets[] | select(.name == "linux-wallpaperengine") | .browser_download_url')
+    if [ -z "$_ENGINE_URL" ]; then
+      echo "Error: binary asset not found in release $_ENGINE_TAG"
+      echo "Make sure a release exists at github.com/$_ENGINE_REPO/releases"
+      exit 1
     fi
-
-    if [ "$_FORCE" = false ] && [ "$LATEST_VER" = "$VERSION" ]; then
-        echo "Already up to date (v$VERSION)"
-        exit 0
-    fi
-
-    echo "Updating v$VERSION -> $LATEST_TAG..."
-    _REPO_RAW="https://raw.githubusercontent.com/bbetter/wall/$LATEST_TAG"
-    for BIN in wall wall-gui wall-picker; do
-        curl -sL "$_REPO_RAW/bin/$BIN" -o "$HOME/.local/bin/$BIN.tmp"
-        chmod +x "$HOME/.local/bin/$BIN.tmp"
-        mv "$HOME/.local/bin/$BIN.tmp" "$HOME/.local/bin/$BIN"
-        echo "  Updated $BIN"
-    done
-
-    _print_whats_new "$LATEST_VER" "$LATEST_TAG"
-
-    _ENGINE_DEST="$HOME/.local/bin/wall-engine"
-    if [ -f "$_ENGINE_DEST" ]; then
-        echo ""
-        echo "Updating fork engine..."
-        _ENGINE_RELEASE=$(curl -s "https://api.github.com/repos/bbetter/linux-wallpaperengine/releases/latest")
-        _ENGINE_TAG=$(echo "$_ENGINE_RELEASE" | jq -r '.tag_name // empty')
-        _ENGINE_URL=$(echo "$_ENGINE_RELEASE" | jq -r '.assets[] | select(.name == "linux-wallpaperengine") | .browser_download_url')
-        if [ -n "$_ENGINE_URL" ]; then
-            curl -sL "$_ENGINE_URL" -o "$_ENGINE_DEST.tmp"
-            chmod +x "$_ENGINE_DEST.tmp"
-            mv "$_ENGINE_DEST.tmp" "$_ENGINE_DEST"
-            echo "  Engine updated to $_ENGINE_TAG"
-        else
-            echo "  Warning: could not fetch engine binary (no release asset found)"
-        fi
-    fi
-
-    echo ""
-    echo "Done. Now on v$LATEST_VER."
-    exit 0
-;;
-
-log)
-    case "${2:-tail}" in
-        clear)
-            rm -f "$LOGFILE"
-            echo "Log cleared"
-            ;;
-        *)
-            tail -f "$LOGFILE"
-            ;;
-    esac
-;;
-
-set)
-    KEY="${2:-}"
-    VAL="${3:-}"
-
-    case "$KEY" in
-        fps)
-            if ! [[ "$VAL" =~ ^[0-9]+$ ]] || [ "$VAL" -eq 0 ]; then
-                echo "Error: fps must be a positive integer (e.g. 30, 60)"
-                exit 1
-            fi
-            ;;
-        scaling)
-            case "$VAL" in
-                fill|fit|stretch|default) ;;
-                *)
-                    echo "Error: scaling must be one of: fill, fit, stretch, default"
-                    exit 1
-                    ;;
-            esac
-            ;;
-        clamp)
-            case "$VAL" in
-                border|clamp|repeat) ;;
-                *)
-                    echo "Error: clamp must be one of: border, clamp, repeat"
-                    exit 1
-                    ;;
-            esac
-            ;;
-        audio)
-            case "$VAL" in
-                0|1) ;;
-                *)
-                    echo "Error: audio must be 0 (silent) or 1 (enabled)"
-                    exit 1
-                    ;;
-            esac
-            ;;
-        volume)
-            if ! [[ "$VAL" =~ ^[0-9]+$ ]] || [ "$VAL" -gt 100 ]; then
-                echo "Error: volume must be an integer between 0 and 100"
-                exit 1
-            fi
-            ;;
-        fullscreen_pause)
-            case "$VAL" in
-                0|1) ;;
-                *)
-                    echo "Error: fullscreen_pause must be 0 (no pause) or 1 (pause)"
-                    exit 1
-                    ;;
-            esac
-            ;;
-        *)
-            echo "Usage: wall set <setting> <value>"
-            echo ""
-            echo "  wall set fps <integer>                   (e.g. 30, 60)"
-            echo "  wall set scaling <fill|fit|stretch|default>"
-            echo "  wall set clamp <border|clamp|repeat>"
-            echo "  wall set audio <0|1>                     (0=silent, 1=enabled)"
-            echo "  wall set volume <0-100>"
-            echo "  wall set fullscreen_pause <0|1>          (0=no pause, 1=pause)"
-            exit 1
-            ;;
-    esac
+    echo "Downloading engine $_ENGINE_TAG..."
+    curl -sL "$_ENGINE_URL" -o "$_ENGINE_DEST.tmp"
+    chmod +x "$_ENGINE_DEST.tmp"
+    mv "$_ENGINE_DEST.tmp" "$_ENGINE_DEST"
+    echo "  Installed to $_ENGINE_DEST"
 
     mkdir -p "$(dirname "$CONFIG_FILE")"
-    CONF_KEY="${KEY^^}"
-
-    if grep -q "^${CONF_KEY}=" "$CONFIG_FILE" 2>/dev/null; then
-        sed -i "s|^${CONF_KEY}=.*|${CONF_KEY}=${VAL}|" "$CONFIG_FILE"
+    if grep -q "^ENGINE_BIN=" "$CONFIG_FILE" 2>/dev/null; then
+      sed -i "s|^ENGINE_BIN=.*|ENGINE_BIN=$_ENGINE_DEST|" "$CONFIG_FILE"
     else
-        echo "${CONF_KEY}=${VAL}" >> "$CONFIG_FILE"
+      echo "ENGINE_BIN=$_ENGINE_DEST" >>"$CONFIG_FILE"
     fi
+    echo "  Switched to fork engine ($_ENGINE_TAG)"
+    is_running && echo "  Restart to apply: wall reload" || true
+    ;;
 
-    echo "Set ${CONF_KEY}=${VAL}"
+  system)
+    sed -i '/^ENGINE_BIN=/d' "$CONFIG_FILE" 2>/dev/null || true
+    echo "Switched to system engine (linux-wallpaperengine)"
+    is_running && echo "  Restart to apply: wall reload" || true
+    ;;
 
-    if is_running; then
-        echo "Restarting daemon to apply..."
-        "$0" reload
-        echo "Done."
+  *)
+    echo "Current engine: $ENGINE_BIN"
+    echo ""
+    echo "Usage: wall use-engine <fork|system>"
+    echo "  fork    — download and use bbetter/linux-wallpaperengine"
+    echo "  system  — use system-installed linux-wallpaperengine (default)"
+    ;;
+  esac
+  ;;
+
+update)
+  _FORCE=false
+  _WHATSNEW=false
+  for _arg in "${@:2}"; do
+    case "$_arg" in
+    --force | --fresh) _FORCE=true ;;
+    --whatsnew) _WHATSNEW=true ;;
+    esac
+  done
+
+  echo "Checking for updates..."
+  LATEST_TAG=$(curl -s "https://api.github.com/repos/bbetter/wall/releases/latest" |
+    jq -r '.tag_name // empty')
+  if [ -z "$LATEST_TAG" ]; then
+    echo "Error: could not fetch release info from GitHub"
+    exit 1
+  fi
+  LATEST_VER="${LATEST_TAG#v}"
+
+  _print_whats_new() {
+    local _ver="$1" _tag="$2"
+    local _cl
+    _cl=$(curl -sf "https://raw.githubusercontent.com/bbetter/wall/$_tag/CHANGELOG.md" 2>/dev/null)
+    if [ -n "$_cl" ]; then
+      echo ""
+      echo "What's new in v${_ver}:"
+      echo "$_cl" |
+        sed -n "/^## v${_ver}$/,/^## v/{ /^## v${_ver}$/d; /^## v[0-9]/d; p; }" |
+        sed '/^[[:space:]]*$/{ 1d; }' |
+        sed 's/^- /  • /'
     fi
-;;
+  }
+
+  if [ "$_WHATSNEW" = true ]; then
+    if [ "$LATEST_VER" = "$VERSION" ]; then
+      echo "You are already on the latest version (v$VERSION)."
+    else
+      echo "v$VERSION → v$LATEST_VER available"
+      _print_whats_new "$LATEST_VER" "$LATEST_TAG"
+    fi
+    exit 0
+  fi
+
+  if [ "$_FORCE" = false ] && [ "$LATEST_VER" = "$VERSION" ]; then
+    echo "Already up to date (v$VERSION)"
+    exit 0
+  fi
+
+  echo "Updating v$VERSION -> $LATEST_TAG..."
+  _REPO_RAW="https://raw.githubusercontent.com/bbetter/wall/$LATEST_TAG"
+  for BIN in wall wall-gui wall-picker; do
+    curl -sL "$_REPO_RAW/bin/$BIN" -o "$HOME/.local/bin/$BIN.tmp"
+    chmod +x "$HOME/.local/bin/$BIN.tmp"
+    mv "$HOME/.local/bin/$BIN.tmp" "$HOME/.local/bin/$BIN"
+    echo "  Updated $BIN"
+  done
+
+  _print_whats_new "$LATEST_VER" "$LATEST_TAG"
+
+  _ENGINE_DEST="$HOME/.local/bin/wall-engine"
+  if [ -f "$_ENGINE_DEST" ]; then
+    echo ""
+    echo "Updating fork engine..."
+    _ENGINE_RELEASE=$(curl -s "https://api.github.com/repos/bbetter/linux-wallpaperengine/releases/latest")
+    _ENGINE_TAG=$(echo "$_ENGINE_RELEASE" | jq -r '.tag_name // empty')
+    _ENGINE_URL=$(echo "$_ENGINE_RELEASE" | jq -r '.assets[] | select(.name == "linux-wallpaperengine") | .browser_download_url')
+    if [ -n "$_ENGINE_URL" ]; then
+      curl -sL "$_ENGINE_URL" -o "$_ENGINE_DEST.tmp"
+      chmod +x "$_ENGINE_DEST.tmp"
+      mv "$_ENGINE_DEST.tmp" "$_ENGINE_DEST"
+      echo "  Engine updated to $_ENGINE_TAG"
+    else
+      echo "  Warning: could not fetch engine binary (no release asset found)"
+    fi
+  fi
+
+  echo ""
+  echo "Done. Now on v$LATEST_VER."
+  exit 0
+  ;;
+
+log)
+  case "${2:-tail}" in
+  clear)
+    rm -f "$LOGFILE"
+    echo "Log cleared"
+    ;;
+  *)
+    tail -f "$LOGFILE"
+    ;;
+  esac
+  ;;
+
+set)
+  KEY="${2:-}"
+  VAL="${3:-}"
+
+  case "$KEY" in
+  fps)
+    if ! [[ "$VAL" =~ ^[0-9]+$ ]] || [ "$VAL" -eq 0 ]; then
+      echo "Error: fps must be a positive integer (e.g. 30, 60)"
+      exit 1
+    fi
+    ;;
+  scaling)
+    case "$VAL" in
+    fill | fit | stretch | default) ;;
+    *)
+      echo "Error: scaling must be one of: fill, fit, stretch, default"
+      exit 1
+      ;;
+    esac
+    ;;
+  clamp)
+    case "$VAL" in
+    border | clamp | repeat) ;;
+    *)
+      echo "Error: clamp must be one of: border, clamp, repeat"
+      exit 1
+      ;;
+    esac
+    ;;
+  audio)
+    case "$VAL" in
+    0 | 1) ;;
+    *)
+      echo "Error: audio must be 0 (silent) or 1 (enabled)"
+      exit 1
+      ;;
+    esac
+    ;;
+  volume)
+    if ! [[ "$VAL" =~ ^[0-9]+$ ]] || [ "$VAL" -gt 100 ]; then
+      echo "Error: volume must be an integer between 0 and 100"
+      exit 1
+    fi
+    ;;
+  fullscreen_pause)
+    case "$VAL" in
+    0 | 1) ;;
+    *)
+      echo "Error: fullscreen_pause must be 0 (no pause) or 1 (pause)"
+      exit 1
+      ;;
+    esac
+    ;;
+  *)
+    echo "Usage: wall set <setting> <value>"
+    echo ""
+    echo "  wall set fps <integer>                   (e.g. 30, 60)"
+    echo "  wall set scaling <fill|fit|stretch|default>"
+    echo "  wall set clamp <border|clamp|repeat>"
+    echo "  wall set audio <0|1>                     (0=silent, 1=enabled)"
+    echo "  wall set volume <0-100>"
+    echo "  wall set fullscreen_pause <0|1>          (0=no pause, 1=pause)"
+    exit 1
+    ;;
+  esac
+
+  mkdir -p "$(dirname "$CONFIG_FILE")"
+  CONF_KEY="${KEY^^}"
+
+  if grep -q "^${CONF_KEY}=" "$CONFIG_FILE" 2>/dev/null; then
+    sed -i "s|^${CONF_KEY}=.*|${CONF_KEY}=${VAL}|" "$CONFIG_FILE"
+  else
+    echo "${CONF_KEY}=${VAL}" >>"$CONFIG_FILE"
+  fi
+
+  echo "Set ${CONF_KEY}=${VAL}"
+
+  if is_running; then
+    echo "Restarting daemon to apply..."
+    "$0" reload
+    echo "Done."
+  fi
+  ;;
 
 cache)
-    case "${2:-rebuild}" in
-        clear)
-            rm -f "$CACHE_FILE"
-            echo "Cache cleared"
-            ;;
-        rebuild)
-            wait_for_steam
-            rm -f "$CACHE_FILE"
-            echo "Building cache..."
-            build_list_cache
-            CACHE_COUNT=$(wc -l < "$CACHE_FILE")
-            echo "Cache rebuilt ($CACHE_COUNT entries)"
-            ;;
-        *)
-            echo "Usage: wall cache [clear|rebuild]"
-            ;;
-    esac
-;;
+  case "${2:-rebuild}" in
+  clear)
+    rm -f "$CACHE_FILE"
+    echo "Cache cleared"
+    ;;
+  rebuild)
+    wait_for_steam
+    rm -f "$CACHE_FILE"
+    echo "Building cache..."
+    build_list_cache
+    CACHE_COUNT=$(wc -l <"$CACHE_FILE")
+    echo "Cache rebuilt ($CACHE_COUNT entries)"
+    ;;
+  *)
+    echo "Usage: wall cache [clear|rebuild]"
+    ;;
+  esac
+  ;;
 
 exclude)
-    EX_ID="${2:-}"
-    if [ -z "$EX_ID" ]; then
-        echo "Usage: wall exclude <id>" >&2; exit 1
-    fi
-    mkdir -p "$(dirname "$EXCLUDED_FILE")"
-    if grep -qxF "$EX_ID" "$EXCLUDED_FILE" 2>/dev/null; then
-        echo "$EX_ID is already excluded"
-    else
-        echo "$EX_ID" >> "$EXCLUDED_FILE"
-        echo "Excluded $EX_ID from random/cycle/shuffle"
-    fi
-;;
+  EX_ID="${2:-}"
+  if [ -z "$EX_ID" ]; then
+    echo "Usage: wall exclude <id>" >&2
+    exit 1
+  fi
+  mkdir -p "$(dirname "$EXCLUDED_FILE")"
+  if grep -qxF "$EX_ID" "$EXCLUDED_FILE" 2>/dev/null; then
+    echo "$EX_ID is already excluded"
+  else
+    echo "$EX_ID" >>"$EXCLUDED_FILE"
+    echo "Excluded $EX_ID from random/cycle/shuffle"
+  fi
+  ;;
 
 include)
-    INC_ID="${2:-}"
-    if [ -z "$INC_ID" ]; then
-        echo "Usage: wall include <id>" >&2; exit 1
-    fi
-    if [ -f "$EXCLUDED_FILE" ]; then
-        sed -i "/^${INC_ID}$/d" "$EXCLUDED_FILE"
-    fi
-    echo "Included $INC_ID in random/cycle/shuffle"
-;;
+  INC_ID="${2:-}"
+  if [ -z "$INC_ID" ]; then
+    echo "Usage: wall include <id>" >&2
+    exit 1
+  fi
+  if [ -f "$EXCLUDED_FILE" ]; then
+    sed -i "/^${INC_ID}$/d" "$EXCLUDED_FILE"
+  fi
+  echo "Included $INC_ID in random/cycle/shuffle"
+  ;;
 
 playlist)
-    case "${2:-}" in
+  case "${2:-}" in
 
-        create)
-            NAME="${3:-}"
-            [ -z "$NAME" ] && { echo "Usage: wall playlist create <name>" >&2; exit 1; }
-            mkdir -p "$PLAYLISTS_DIR"
-            PFILE="$PLAYLISTS_DIR/$NAME"
-            if [ -f "$PFILE" ]; then
-                echo "Playlist '$NAME' already exists"
-            else
-                touch "$PFILE"
-                echo "Created playlist '$NAME'"
-            fi
-            ;;
+  create)
+    NAME="${3:-}"
+    [ -z "$NAME" ] && {
+      echo "Usage: wall playlist create <name>" >&2
+      exit 1
+    }
+    mkdir -p "$PLAYLISTS_DIR"
+    PFILE="$PLAYLISTS_DIR/$NAME"
+    if [ -f "$PFILE" ]; then
+      echo "Playlist '$NAME' already exists"
+    else
+      touch "$PFILE"
+      echo "Created playlist '$NAME'"
+    fi
+    ;;
 
-        add)
-            NAME="${3:-}"
-            [ -z "$NAME" ] && { echo "Usage: wall playlist add <name> <id> [id ...]" >&2; exit 1; }
-            PFILE="$PLAYLISTS_DIR/$NAME"
-            [ -f "$PFILE" ] || { echo "Playlist '$NAME' not found" >&2; exit 1; }
-            shift 3
-            for ID in "$@"; do
-                if grep -qxF "$ID" "$PFILE" 2>/dev/null; then
-                    echo "$ID already in playlist '$NAME'"
-                else
-                    echo "$ID" >> "$PFILE"
-                    echo "Added $ID to '$NAME'"
-                fi
-            done
-            ;;
+  add)
+    NAME="${3:-}"
+    [ -z "$NAME" ] && {
+      echo "Usage: wall playlist add <name> <id> [id ...]" >&2
+      exit 1
+    }
+    PFILE="$PLAYLISTS_DIR/$NAME"
+    [ -f "$PFILE" ] || {
+      echo "Playlist '$NAME' not found" >&2
+      exit 1
+    }
+    shift 3
+    for ID in "$@"; do
+      if grep -qxF "$ID" "$PFILE" 2>/dev/null; then
+        echo "$ID already in playlist '$NAME'"
+      else
+        echo "$ID" >>"$PFILE"
+        echo "Added $ID to '$NAME'"
+      fi
+    done
+    ;;
 
-        remove)
-            NAME="${3:-}"
-            [ -z "$NAME" ] && { echo "Usage: wall playlist remove <name> <id> [id ...]" >&2; exit 1; }
-            PFILE="$PLAYLISTS_DIR/$NAME"
-            [ -f "$PFILE" ] || { echo "Playlist '$NAME' not found" >&2; exit 1; }
-            shift 3
-            for ID in "$@"; do
-                if grep -qxF "$ID" "$PFILE" 2>/dev/null; then
-                    sed -i "/^${ID}$/d" "$PFILE"
-                    echo "Removed $ID from '$NAME'"
-                else
-                    echo "$ID not in playlist '$NAME'"
-                fi
-            done
-            ;;
+  remove)
+    NAME="${3:-}"
+    [ -z "$NAME" ] && {
+      echo "Usage: wall playlist remove <name> <id> [id ...]" >&2
+      exit 1
+    }
+    PFILE="$PLAYLISTS_DIR/$NAME"
+    [ -f "$PFILE" ] || {
+      echo "Playlist '$NAME' not found" >&2
+      exit 1
+    }
+    shift 3
+    for ID in "$@"; do
+      if grep -qxF "$ID" "$PFILE" 2>/dev/null; then
+        sed -i "/^${ID}$/d" "$PFILE"
+        echo "Removed $ID from '$NAME'"
+      else
+        echo "$ID not in playlist '$NAME'"
+      fi
+    done
+    ;;
 
-        delete)
-            NAME="${3:-}"
-            [ -z "$NAME" ] && { echo "Usage: wall playlist delete <name>" >&2; exit 1; }
-            PFILE="$PLAYLISTS_DIR/$NAME"
-            [ -f "$PFILE" ] || { echo "Playlist '$NAME' not found" >&2; exit 1; }
-            rm "$PFILE"
-            echo "Deleted playlist '$NAME'"
-            ;;
+  delete)
+    NAME="${3:-}"
+    [ -z "$NAME" ] && {
+      echo "Usage: wall playlist delete <name>" >&2
+      exit 1
+    }
+    PFILE="$PLAYLISTS_DIR/$NAME"
+    [ -f "$PFILE" ] || {
+      echo "Playlist '$NAME' not found" >&2
+      exit 1
+    }
+    rm "$PFILE"
+    echo "Deleted playlist '$NAME'"
+    ;;
 
-        list)
-            mkdir -p "$PLAYLISTS_DIR"
-            FOUND=0
-            shopt -s nullglob
-            for PFILE in "$PLAYLISTS_DIR"/*; do
-                NAME=$(basename "$PFILE")
-                COUNT=$(wc -l < "$PFILE")
-                echo "$NAME  ($COUNT entries)"
-                FOUND=1
-            done
-            shopt -u nullglob
-            [ "$FOUND" -eq 0 ] && echo "No playlists found"
-            ;;
+  list)
+    mkdir -p "$PLAYLISTS_DIR"
+    FOUND=0
+    shopt -s nullglob
+    for PFILE in "$PLAYLISTS_DIR"/*; do
+      NAME=$(basename "$PFILE")
+      COUNT=$(wc -l <"$PFILE")
+      echo "$NAME  ($COUNT entries)"
+      FOUND=1
+    done
+    shopt -u nullglob
+    [ "$FOUND" -eq 0 ] && echo "No playlists found"
+    ;;
 
-        show)
-            NAME="${3:-}"
-            [ -z "$NAME" ] && { echo "Usage: wall playlist show <name>" >&2; exit 1; }
-            PFILE="$PLAYLISTS_DIR/$NAME"
-            [ -f "$PFILE" ] || { echo "Playlist '$NAME' not found" >&2; exit 1; }
-            ensure_cache
-            while IFS= read -r ID; do
-                [ -z "$ID" ] && continue
-                PTITLE=$(grep -m1 "^${ID}	" "$CACHE_FILE" | cut -f2)
-                if [ -n "$PTITLE" ]; then
-                    echo "$ID  $PTITLE"
-                else
-                    echo "$ID  [not found in workshop]"
-                fi
-            done < "$PFILE"
-            ;;
+  show)
+    NAME="${3:-}"
+    [ -z "$NAME" ] && {
+      echo "Usage: wall playlist show <name>" >&2
+      exit 1
+    }
+    PFILE="$PLAYLISTS_DIR/$NAME"
+    [ -f "$PFILE" ] || {
+      echo "Playlist '$NAME' not found" >&2
+      exit 1
+    }
+    ensure_cache
+    while IFS= read -r ID; do
+      [ -z "$ID" ] && continue
+      PTITLE=$(grep -m1 "^${ID}	" "$CACHE_FILE" | cut -f2)
+      if [ -n "$PTITLE" ]; then
+        echo "$ID  $PTITLE"
+      else
+        echo "$ID  [not found in workshop]"
+      fi
+    done <"$PFILE"
+    ;;
 
-        play)
-            NAME="${3:-}"
-            [ -z "$NAME" ] && { echo "Usage: wall playlist play <name> [seconds] [monitor]" >&2; exit 1; }
-            PFILE="$PLAYLISTS_DIR/$NAME"
-            [ -f "$PFILE" ] || { echo "Playlist '$NAME' not found" >&2; exit 1; }
-            echo "${4:-300}" > "$CYCLE_FILE"
-            log "playlist play $NAME interval=${4:-300}"
-            send_playlist_play_cmd "$NAME" "${5:-}"
-            ;;
+  play)
+    NAME="${3:-}"
+    [ -z "$NAME" ] && {
+      echo "Usage: wall playlist play <name> [seconds] [monitor]" >&2
+      exit 1
+    }
+    PFILE="$PLAYLISTS_DIR/$NAME"
+    [ -f "$PFILE" ] || {
+      echo "Playlist '$NAME' not found" >&2
+      exit 1
+    }
+    echo "${4:-300}" >"$CYCLE_FILE"
+    log "playlist play $NAME interval=${4:-300}"
+    send_playlist_play_cmd "$NAME" "${5:-}"
+    ;;
 
-        shuffle)
-            NAME="${3:-}"
-            [ -z "$NAME" ] && { echo "Usage: wall playlist shuffle <name> [seconds] [monitor]" >&2; exit 1; }
-            PFILE="$PLAYLISTS_DIR/$NAME"
-            [ -f "$PFILE" ] || { echo "Playlist '$NAME' not found" >&2; exit 1; }
-            echo "${4:-300}" > "$CYCLE_FILE"
-            log "playlist shuffle $NAME interval=${4:-300}"
-            send_playlist_shuffle_cmd "$NAME" "${5:-}"
-            ;;
+  shuffle)
+    NAME="${3:-}"
+    [ -z "$NAME" ] && {
+      echo "Usage: wall playlist shuffle <name> [seconds] [monitor]" >&2
+      exit 1
+    }
+    PFILE="$PLAYLISTS_DIR/$NAME"
+    [ -f "$PFILE" ] || {
+      echo "Playlist '$NAME' not found" >&2
+      exit 1
+    }
+    echo "${4:-300}" >"$CYCLE_FILE"
+    log "playlist shuffle $NAME interval=${4:-300}"
+    send_playlist_shuffle_cmd "$NAME" "${5:-}"
+    ;;
 
-        *)
-            echo "Usage: wall playlist <command>"
-            echo ""
-            echo "  wall playlist create <name>"
-            echo "  wall playlist add <name> <id> [id ...]"
-            echo "  wall playlist remove <name> <id> [id ...]"
-            echo "  wall playlist delete <name>"
-            echo "  wall playlist list"
-            echo "  wall playlist show <name>"
-            echo "  wall playlist play <name> [seconds] [monitor]"
-            echo "  wall playlist shuffle <name> [seconds] [monitor]"
-            ;;
-    esac
-;;
+  *)
+    echo "Usage: wall playlist <command>"
+    echo ""
+    echo "  wall playlist create <name>"
+    echo "  wall playlist add <name> <id> [id ...]"
+    echo "  wall playlist remove <name> <id> [id ...]"
+    echo "  wall playlist delete <name>"
+    echo "  wall playlist list"
+    echo "  wall playlist show <name>"
+    echo "  wall playlist play <name> [seconds] [monitor]"
+    echo "  wall playlist shuffle <name> [seconds] [monitor]"
+    ;;
+  esac
+  ;;
 
 [0-9]*)
-    send_cmd "run" "$1${2:+ $2}"
-;;
+  send_cmd "run" "$1${2:+ $2}"
+  ;;
 
 *)
-echo "Usage:"
-echo "  wall random [monitor]"
-echo "  wall cycle [seconds] [monitor]"
-echo "  wall shuffle [seconds] [monitor]"
-echo "  wall next [monitor]"
-echo "  wall prev [monitor]"
-echo "  wall status"
-echo "  wall monitors"
-echo "  wall info <id>"
-echo "  wall props <id>"
-echo "  wall prop set <id> <key>=<value>"
-echo "  wall <id> [monitor]"
-echo "  wall list"
-echo "  wall stop [monitor]"
-echo "  wall set fps <integer>"
-echo "  wall set scaling <fill|fit|stretch|default>"
-echo "  wall set audio <0|1>"
-echo "  wall set volume <0-100>"
-echo "  wall log"
-echo "  wall cache [clear|rebuild]"
-echo "  wall exclude <id>"
-echo "  wall include <id>"
-echo "  wall playlist create/add/remove/delete/list/show <name>"
-echo "  wall playlist play <name> [seconds] [monitor]"
-echo "  wall playlist shuffle <name> [seconds] [monitor]"
-echo "  wall use-engine <fork|system>"
-echo "  wall update [--force] [--whatsnew]"
-echo "  wall version [--all]"
-;;
+  echo "Usage:"
+  echo "  wall random [monitor]"
+  echo "  wall cycle [seconds] [monitor]"
+  echo "  wall shuffle [seconds] [monitor]"
+  echo "  wall next [monitor]"
+  echo "  wall prev [monitor]"
+  echo "  wall status"
+  echo "  wall monitors"
+  echo "  wall info <id>"
+  echo "  wall props <id>"
+  echo "  wall prop set <id> <key>=<value>"
+  echo "  wall <id> [monitor]"
+  echo "  wall list"
+  echo "  wall stop [monitor]"
+  echo "  wall set fps <integer>"
+  echo "  wall set scaling <fill|fit|stretch|default>"
+  echo "  wall set audio <0|1>"
+  echo "  wall set volume <0-100>"
+  echo "  wall log"
+  echo "  wall cache [clear|rebuild]"
+  echo "  wall exclude <id>"
+  echo "  wall include <id>"
+  echo "  wall playlist create/add/remove/delete/list/show <name>"
+  echo "  wall playlist play <name> [seconds] [monitor]"
+  echo "  wall playlist shuffle <name> [seconds] [monitor]"
+  echo "  wall use-engine <fork|system>"
+  echo "  wall update [--force] [--whatsnew]"
+  echo "  wall version [--all]"
+  ;;
 
 esac
