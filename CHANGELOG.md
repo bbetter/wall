@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.0.13
+- Fix: auto-reload stale daemons by comparing running daemon version vs CLI version before sending commands
+- Add: daemon version tracking file (`~/.cache/wall/daemon.version`) to keep GUI/CLI commands aligned after upgrades
+
 ## v1.0.12
 - Fix: daemon now reloads runtime config before each engine launch so GUI apply always uses current engine/settings
 - Fix: startup config/default initialization order in `bin/wall` to prevent stale launch parameters
