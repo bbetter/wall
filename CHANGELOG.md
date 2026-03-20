@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.0.9
+- Fix: CI ShellCheck warning SC2046 in `wait_for_steam` by switching to arithmetic comparison syntax
+
 ## v1.0.8
 - Fix: wall-gui now runs `wall` with a stable PATH that prioritizes `~/.local/bin`, so GUI launches respect the current engine selection instead of accidentally using a system `linux-wallpaperengine`
 - Add: expanded runtime logging for GUI and CLI/daemon actions (wall/engine resolution, command execution, apply/reload/playlist events, and engine launch metadata)
