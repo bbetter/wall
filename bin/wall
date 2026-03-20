@@ -59,6 +59,7 @@ CLAMP=border
 AUDIO=0
 VOLUME=15
 FULLSCREEN_PAUSE=0
+ENGINE_BIN="${ENGINE_BIN:-linux-wallpaperengine}"
 
 mkdir -p "$STATE_DIR" "$MON_DIR"
 
@@ -198,7 +199,7 @@ done
 shopt -u nullglob
 
 # Safety net for processes started before per-monitor PID tracking
-pkill -f linux-wallpaperengine 2>/dev/null
+pkill -f "$(basename "$ENGINE_BIN")" 2>/dev/null
 
 }
 
@@ -252,7 +253,7 @@ fi
 local PAUSE_FLAGS=()
 [ "${FULLSCREEN_PAUSE:-0}" = "0" ] && PAUSE_FLAGS=(--no-fullscreen-pause)
 
-linux-wallpaperengine \
+"$ENGINE_BIN" \
     "$DIR" \
     --assets-dir "$ASSETS" \
     --screen-root "$MON" \
@@ -1189,7 +1190,7 @@ info)
         CHECK_FILE="$CHECKS_DIR/$INFO_ID"
         if [ ! -f "$CHECK_FILE" ]; then
             DUMP_OUT=$(env -u DISPLAY -u WAYLAND_DISPLAY \
-                timeout 1 linux-wallpaperengine \
+                timeout 1 "$ENGINE_BIN" \
                 --assets-dir "$ASSETS" --dump-structure "$INFO_DIR" 2>&1 || true)
             WARN_ITEMS=""
             if echo "$DUMP_OUT" | grep -q "Text objects are not supported"; then
@@ -1312,6 +1313,58 @@ version)
     fi
 ;;
 
+use-engine)
+    _ENGINE_DEST="$HOME/.local/bin/wall-engine"
+    _ENGINE_REPO="bbetter/linux-wallpaperengine"
+    _MODE="${2:-}"
+
+    case "$_MODE" in
+        fork)
+            echo "Fetching latest engine release..."
+            _ENGINE_RELEASE=$(curl -s "https://api.github.com/repos/$_ENGINE_REPO/releases/latest")
+            _ENGINE_TAG=$(echo "$_ENGINE_RELEASE" | jq -r '.tag_name // empty')
+            if [ -z "$_ENGINE_TAG" ]; then
+                echo "Error: could not fetch engine release from GitHub"
+                exit 1
+            fi
+            _ENGINE_URL=$(echo "$_ENGINE_RELEASE" | jq -r '.assets[] | select(.name == "linux-wallpaperengine") | .browser_download_url')
+            if [ -z "$_ENGINE_URL" ]; then
+                echo "Error: binary asset not found in release $_ENGINE_TAG"
+                echo "Make sure a release exists at github.com/$_ENGINE_REPO/releases"
+                exit 1
+            fi
+            echo "Downloading engine $_ENGINE_TAG..."
+            curl -sL "$_ENGINE_URL" -o "$_ENGINE_DEST.tmp"
+            chmod +x "$_ENGINE_DEST.tmp"
+            mv "$_ENGINE_DEST.tmp" "$_ENGINE_DEST"
+            echo "  Installed to $_ENGINE_DEST"
+
+            mkdir -p "$(dirname "$CONFIG_FILE")"
+            if grep -q "^ENGINE_BIN=" "$CONFIG_FILE" 2>/dev/null; then
+                sed -i "s|^ENGINE_BIN=.*|ENGINE_BIN=$_ENGINE_DEST|" "$CONFIG_FILE"
+            else
+                echo "ENGINE_BIN=$_ENGINE_DEST" >> "$CONFIG_FILE"
+            fi
+            echo "  Switched to fork engine ($_ENGINE_TAG)"
+            is_running && echo "  Restart to apply: wall reload" || true
+            ;;
+
+        system)
+            sed -i '/^ENGINE_BIN=/d' "$CONFIG_FILE" 2>/dev/null || true
+            echo "Switched to system engine (linux-wallpaperengine)"
+            is_running && echo "  Restart to apply: wall reload" || true
+            ;;
+
+        *)
+            echo "Current engine: $ENGINE_BIN"
+            echo ""
+            echo "Usage: wall use-engine <fork|system>"
+            echo "  fork    — download and use bbetter/linux-wallpaperengine"
+            echo "  system  — use system-installed linux-wallpaperengine (default)"
+            ;;
+    esac
+;;
+
 update)
     _FORCE=false
     _WHATSNEW=false
@@ -1370,6 +1423,24 @@ update)
     done
 
     _print_whats_new "$LATEST_VER" "$LATEST_TAG"
+
+    _ENGINE_DEST="$HOME/.local/bin/wall-engine"
+    if [ -f "$_ENGINE_DEST" ]; then
+        echo ""
+        echo "Updating fork engine..."
+        _ENGINE_RELEASE=$(curl -s "https://api.github.com/repos/bbetter/linux-wallpaperengine/releases/latest")
+        _ENGINE_TAG=$(echo "$_ENGINE_RELEASE" | jq -r '.tag_name // empty')
+        _ENGINE_URL=$(echo "$_ENGINE_RELEASE" | jq -r '.assets[] | select(.name == "linux-wallpaperengine") | .browser_download_url')
+        if [ -n "$_ENGINE_URL" ]; then
+            curl -sL "$_ENGINE_URL" -o "$_ENGINE_DEST.tmp"
+            chmod +x "$_ENGINE_DEST.tmp"
+            mv "$_ENGINE_DEST.tmp" "$_ENGINE_DEST"
+            echo "  Engine updated to $_ENGINE_TAG"
+        else
+            echo "  Warning: could not fetch engine binary (no release asset found)"
+        fi
+    fi
+
     echo ""
     echo "Done. Now on v$LATEST_VER."
     exit 0
@@ -1669,6 +1740,7 @@ echo "  wall include <id>"
 echo "  wall playlist create/add/remove/delete/list/show <name>"
 echo "  wall playlist play <name> [seconds] [monitor]"
 echo "  wall playlist shuffle <name> [seconds] [monitor]"
+echo "  wall use-engine <fork|system>"
 echo "  wall update [--force] [--whatsnew]"
 echo "  wall version [--all]"
 ;;
