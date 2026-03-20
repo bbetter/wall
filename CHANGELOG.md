@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.0.8
+- Fix: wall-gui now runs `wall` with a stable PATH that prioritizes `~/.local/bin`, so GUI launches respect the current engine selection instead of accidentally using a system `linux-wallpaperengine`
+- Add: expanded runtime logging for GUI and CLI/daemon actions (wall/engine resolution, command execution, apply/reload/playlist events, and engine launch metadata)
+- Change: unified logs into `~/.cache/wall/wall.log` with source tags: `[GUI]` and `[SYSTEM]`; `wall log` now tails both streams together
+
 ## v1.0.3
 - Fix: wall-gui startup blocked the UI while loading wallpapers, monitors, and favorites; data is now fetched in a background thread with a spinner shown until ready
 - Fix: get_wall_bin() now prefers ~/.local/bin/wall explicitly to avoid picking up the system wall utility (util-linux) when launched from Hyprland's exec environment

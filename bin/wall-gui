@@ -34,8 +34,23 @@ import re
 import subprocess
 import shutil
 import threading
+from datetime import datetime
 
 MEDIA_EXTS = {".mp4", ".webm", ".gif"}
+GUI_LOG_FILE = os.path.expanduser("~/.cache/wall/wall.log")
+_LAST_WALL_BIN = None
+_WALL_ENV_LOGGED = False
+
+
+def gui_log(message):
+    """Append a timestamped message to the wall-gui log."""
+    try:
+        os.makedirs(os.path.dirname(GUI_LOG_FILE), exist_ok=True)
+        with open(GUI_LOG_FILE, "a") as f:
+            ts = datetime.now().strftime("%H:%M:%S")
+            f.write(f"{ts} [GUI] {message}\n")
+    except OSError:
+        pass
 
 ########################################
 # BBCODE → PANGO MARKUP
@@ -80,10 +95,37 @@ def get_wall_bin():
     system 'wall' utility (util-linux) which may appear first on the PATH
     when launched from Hyprland's exec environment.
     """
+    global _LAST_WALL_BIN
     local = os.path.expanduser("~/.local/bin/wall")
     if os.path.isfile(local) and os.access(local, os.X_OK):
-        return local
-    return shutil.which("wall") or local
+        wall_bin = local
+    else:
+        wall_bin = shutil.which("wall") or local
+    if wall_bin != _LAST_WALL_BIN:
+        gui_log(f"wall bin resolved: {wall_bin}")
+        _LAST_WALL_BIN = wall_bin
+    return wall_bin
+
+
+def wall_env():
+    """Build a stable env for wall subprocesses.
+
+    GUI launchers often provide a trimmed PATH; ensure user-local binaries
+    (including engine overrides) are preferred the same way as shell usage.
+    """
+    global _WALL_ENV_LOGGED
+    env = os.environ.copy()
+    local_bin = os.path.expanduser("~/.local/bin")
+    path = env.get("PATH", "")
+    parts = [p for p in path.split(":") if p]
+    if local_bin in parts:
+        parts = [p for p in parts if p != local_bin]
+    parts.insert(0, local_bin)
+    env["PATH"] = ":".join(parts)
+    if not _WALL_ENV_LOGGED:
+        gui_log(f"wall env PATH={env['PATH']}")
+        _WALL_ENV_LOGGED = True
+    return env
 
 
 def wall_cmd(*args, timeout=45):
@@ -93,13 +135,24 @@ def wall_cmd(*args, timeout=45):
     wall-gui from hanging indefinitely when the Steam library drive is
     not yet mounted and wait_for_steam() would otherwise loop forever.
     """
+    cmd = [get_wall_bin(), *args]
+    gui_log(f"wall_cmd run: {' '.join(cmd)} timeout={timeout}s")
     try:
-        return subprocess.run(
-            [get_wall_bin(), *args],
+        proc = subprocess.run(
+            cmd,
             capture_output=True, text=True,
             timeout=timeout,
-        ).stdout
+            env=wall_env(),
+        )
+        stderr = (proc.stderr or "").strip()
+        if proc.returncode != 0 or stderr:
+            gui_log(f"wall_cmd result: rc={proc.returncode} stderr={stderr or '-'}")
+        return proc.stdout
     except subprocess.TimeoutExpired:
+        gui_log(f"wall_cmd timeout: {' '.join(cmd)}")
+        return ""
+    except Exception as exc:
+        gui_log(f"wall_cmd exception: {' '.join(cmd)} error={exc}")
         return ""
 
 
@@ -144,7 +197,8 @@ def apply_wallpaper(wall_id, monitor):
     cmd = [get_wall_bin(), wall_id]
     if monitor != "ALL":
         cmd.append(monitor)
-    subprocess.Popen(cmd)
+    gui_log(f"apply_wallpaper: {' '.join(cmd)}")
+    subprocess.Popen(cmd, env=wall_env())
 
 
 def load_saved_props(wall_id):
@@ -462,6 +516,7 @@ class SettingsWindow(Gtk.Window):
         with open(config_file, "w") as f:
             for k, v in conf.items():
                 f.write(f"{k}={v}\n")
+        gui_log(f"settings apply: updates={updates}")
         wall_cmd("reload")
         self.close()
 
@@ -771,6 +826,7 @@ class PlaylistWindow(Gtk.Window):
         args = ["playlist", "play", self._selected_playlist, interval]
         if monitor != "ALL monitors":
             args.append(monitor)
+        gui_log(f"playlist play: name={self._selected_playlist} interval={interval} monitor={monitor}")
         wall_cmd(*args)
 
     def _on_shuffle(self, _btn):
@@ -783,6 +839,7 @@ class PlaylistWindow(Gtk.Window):
         args = ["playlist", "shuffle", self._selected_playlist, interval]
         if monitor != "ALL monitors":
             args.append(monitor)
+        gui_log(f"playlist shuffle: name={self._selected_playlist} interval={interval} monitor={monitor}")
         wall_cmd(*args)
 
     # --- Drag and drop ---
@@ -1264,6 +1321,7 @@ class WallGui(Gtk.ApplicationWindow):
         walls    = load_wallpapers()
         monitors = get_monitors()
         favs     = set(load_playlist_ids(FAVORITES_NAME))
+        gui_log(f"initial load: wallpapers={len(walls)} monitors={','.join(monitors)} favorites={len(favs)}")
         GLib.idle_add(self._on_data_loaded, walls, monitors, favs)
 
     def _on_data_loaded(self, walls, monitors, favs):
@@ -1719,6 +1777,7 @@ class WallGui(Gtk.ApplicationWindow):
         """Persist flag change and re-launch wallpaper on active monitors."""
         if not self.selected_id:
             return
+        gui_log(f"flag toggled: id={self.selected_id} flag={flag} enabled={btn.get_active()}")
         set_wall_flag(self.selected_id, flag, btn.get_active())
         for mon in get_active_monitors_for(self.selected_id):
             wall_cmd(self.selected_id, mon)
@@ -1742,6 +1801,7 @@ class WallGui(Gtk.ApplicationWindow):
         """Repopulate the list without losing the current selection."""
         self.wallpapers = load_wallpapers()
         self._favorites = set(load_playlist_ids(FAVORITES_NAME))
+        gui_log(f"reload list: wallpapers={len(self.wallpapers)} favorites={len(self._favorites)}")
         child = self.listbox.get_first_child()
         while child:
             nxt = child.get_next_sibling()
@@ -1911,6 +1971,7 @@ class WallGui(Gtk.ApplicationWindow):
         if not self.selected_id:
             return
         self._overflow_popover.popdown()
+        gui_log(f"open steam: id={self.selected_id} url={self._steam_url()}")
         subprocess.Popen(["xdg-open", self._steam_url()])
 
     def _on_share(self, _btn):
@@ -1918,17 +1979,20 @@ class WallGui(Gtk.ApplicationWindow):
         if not self.selected_id:
             return
         self._overflow_popover.popdown()
+        gui_log(f"copy steam url: id={self.selected_id} url={self._steam_url()}")
         Gdk.Display.get_default().get_clipboard().set(self._steam_url())
 
     def _on_apply(self, _btn):
         """Apply the selected wallpaper: persist staged props, then launch."""
         if not self.selected_id:
             return
+        gui_log(f"apply requested: id={self.selected_id} staged_props={len(self._staged_props)}")
         # persist staged property overrides
         for key, val in self._staged_props.items():
             wall_cmd("prop", "set", self.selected_id, f"{key}={val}")
         item = self.mon_drop.get_selected_item()
         monitor = item.get_string() if item else "ALL"
+        gui_log(f"apply monitor: id={self.selected_id} monitor={monitor}")
         apply_wallpaper(self.selected_id, monitor)
 
 
@@ -1944,9 +2008,11 @@ class App(Gtk.Application):
 
     def do_activate(self):
         """Create and present the main window."""
+        gui_log("app activate")
         win = WallGui(self)
         win.present()
 
 
 if __name__ == "__main__":
+    gui_log("app start")
     App().run(None)
