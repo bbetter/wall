@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.0.10
+- Add: engine process output is now written to `~/.cache/wall/wall.log` with `[ENGINE]` tag (including launch stdout/stderr and scene dump-structure probe output)
+
 ## v1.0.9
 - Fix: CI ShellCheck warning SC2046 in `wait_for_steam` by switching to arithmetic comparison syntax
 

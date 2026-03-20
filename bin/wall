@@ -22,7 +22,7 @@
 # CONFIG
 ########################################
 
-VERSION="1.0.9"
+VERSION="1.0.10"
 
 CONFIG_FILE="$HOME/.config/wall/config"
 
@@ -70,6 +70,11 @@ mkdir -p "$STATE_DIR" "$MON_DIR"
 # Append a timestamped message to the log file.
 log() {
   echo "$(date '+%H:%M:%S') [SYSTEM] $*" >>"$LOGFILE"
+}
+
+# Append a timestamped engine message to the log file.
+engine_log() {
+  echo "$(date '+%H:%M:%S') [ENGINE] $*" >>"$LOGFILE"
 }
 
 # Log resolved config and paths once at startup (aids debugging).
@@ -274,7 +279,9 @@ launch_on_monitor() {
     "${AUDIO_FLAGS[@]}" \
     "${PAUSE_FLAGS[@]}" \
     "${WP_FLAGS[@]}" \
-    "${PROP_FLAGS[@]}" &
+    "${PROP_FLAGS[@]}" \
+    > >(while IFS= read -r _line; do engine_log "monitor=$MON id=$ID stdout: $_line"; done) \
+    2> >(while IFS= read -r _line; do engine_log "monitor=$MON id=$ID stderr: $_line"; done) &
 
   local LAUNCHED_PID=$!
   echo "$LAUNCHED_PID" >"$D/pid"
@@ -1218,6 +1225,11 @@ info)
       DUMP_OUT=$(env -u DISPLAY -u WAYLAND_DISPLAY \
         timeout 1 "$ENGINE_BIN" \
         --assets-dir "$ASSETS" --dump-structure "$INFO_DIR" 2>&1 || true)
+      if [ -n "$DUMP_OUT" ]; then
+        while IFS= read -r _line; do
+          [ -n "$_line" ] && engine_log "dump-structure id=$INFO_ID: $_line"
+        done <<<"$DUMP_OUT"
+      fi
       WARN_ITEMS=""
       if echo "$DUMP_OUT" | grep -q "Text objects are not supported"; then
         WARN_ITEMS="\"Text and clock layers will not be rendered\""
