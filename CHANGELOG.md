@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.0.12
+- Fix: daemon now reloads runtime config before each engine launch so GUI apply always uses current engine/settings
+- Fix: startup config/default initialization order in `bin/wall` to prevent stale launch parameters
+
 ## v1.0.11
 - Add: wall-gui Settings now includes an Engine selector (system/fork) wired to `wall use-engine`
 - Add: wall-gui Settings now shows configured/resolved engine path status to make active engine selection visible
