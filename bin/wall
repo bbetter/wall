@@ -22,7 +22,7 @@
 # CONFIG
 ########################################
 
-VERSION="1.0.17"
+VERSION="1.0.18"
 
 CONFIG_FILE="$HOME/.config/wall/config"
 
@@ -153,6 +153,7 @@ install_fork_engine_from_release() {
   local ENGINE_ARCHIVE=""
   local ENGINE_FOUND_BIN=""
   local ENGINE_FOUND_DIR=""
+  local ENGINE_KEEP_RELEASES="${WALL_ENGINE_KEEP_RELEASES:-1}"
   local -a CURL_FLAGS=()
 
   if [ -t 1 ]; then
@@ -192,10 +193,20 @@ install_fork_engine_from_release() {
 
     case "$ENGINE_BUNDLE_NAME" in
     *.tar.gz | *.tgz)
-      tar -xzf "$ENGINE_ARCHIVE" -C "$ENGINE_TMP_DIR"
+      if ! tar -xzf "$ENGINE_ARCHIVE" -C "$ENGINE_TMP_DIR"; then
+        echo "Error: failed to extract engine bundle $ENGINE_BUNDLE_NAME"
+        rm -f "$ENGINE_ARCHIVE"
+        rm -rf "$ENGINE_TMP_DIR"
+        return 1
+      fi
       ;;
     *.tar.zst)
-      tar --zstd -xf "$ENGINE_ARCHIVE" -C "$ENGINE_TMP_DIR"
+      if ! tar --zstd -xf "$ENGINE_ARCHIVE" -C "$ENGINE_TMP_DIR"; then
+        echo "Error: failed to extract engine bundle $ENGINE_BUNDLE_NAME"
+        rm -f "$ENGINE_ARCHIVE"
+        rm -rf "$ENGINE_TMP_DIR"
+        return 1
+      fi
       ;;
     *)
       echo "Error: unsupported engine bundle format: $ENGINE_BUNDLE_NAME"
@@ -238,6 +249,31 @@ EOF
 
     echo "  Installed bundle to $ENGINE_FOUND_DIR"
     echo "  Wrapper installed at $ENGINE_DEST"
+
+    # Keep only the latest few engine releases to avoid filling /home over time.
+    if [[ "$ENGINE_KEEP_RELEASES" =~ ^[0-9]+$ ]]; then
+      if [ "$ENGINE_KEEP_RELEASES" -lt 1 ]; then
+        ENGINE_KEEP_RELEASES=1
+      fi
+    else
+      ENGINE_KEEP_RELEASES=1
+    fi
+
+    local _REL_BASE="$ENGINE_HOME/releases"
+    if [ -d "$_REL_BASE" ]; then
+      mapfile -t _REL_DIRS < <(find "$_REL_BASE" -mindepth 1 -maxdepth 1 -type d -name "v*" | sort -V)
+      local _COUNT="${#_REL_DIRS[@]}"
+      if [ "$_COUNT" -gt "$ENGINE_KEEP_RELEASES" ]; then
+        local _DEL_COUNT=$((_COUNT - ENGINE_KEEP_RELEASES))
+        local _IDX
+        for ((_IDX = 0; _IDX < _DEL_COUNT; _IDX++)); do
+          if [ "${_REL_DIRS[$_IDX]}" != "$ENGINE_RELEASE_DIR" ]; then
+            rm -rf "${_REL_DIRS[$_IDX]}"
+            log "use-engine fork: pruned old engine release $(basename "${_REL_DIRS[$_IDX]}")"
+          fi
+        done
+      fi
+    fi
   elif [ -n "$ENGINE_BIN_URL" ]; then
     echo "Downloading engine $ENGINE_TAG..."
     if ! curl "${CURL_FLAGS[@]}" "$ENGINE_BIN_URL" -o "$ENGINE_DEST.tmp"; then
