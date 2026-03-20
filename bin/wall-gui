@@ -996,6 +996,134 @@ class PlaylistWindow(Gtk.Window):
 
 
 ########################################
+# LOG WINDOW
+########################################
+
+class LogWindow(Gtk.Window):
+    """Live log viewer with search and severity highlighting."""
+
+    def __init__(self, parent):
+        super().__init__(title="wall log", transient_for=parent)
+        self.set_default_size(920, 520)
+        self._all_lines = []
+        self._query = ""
+        self._auto_refresh = True
+
+        root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        root.set_margin_top(10)
+        root.set_margin_bottom(10)
+        root.set_margin_start(10)
+        root.set_margin_end(10)
+        self.set_child(root)
+
+        controls = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        root.append(controls)
+
+        self._search = Gtk.SearchEntry()
+        self._search.set_placeholder_text("Search logs…")
+        self._search.set_hexpand(True)
+        self._search.connect("search-changed", self._on_search_changed)
+        controls.append(self._search)
+
+        refresh_btn = Gtk.Button(label="Refresh")
+        refresh_btn.connect("clicked", self._on_refresh_clicked)
+        controls.append(refresh_btn)
+
+        self._auto_sw = Gtk.Switch()
+        self._auto_sw.set_active(True)
+        self._auto_sw.connect("notify::active", self._on_auto_toggled)
+        controls.append(Gtk.Label(label="Auto"))
+        controls.append(self._auto_sw)
+
+        self._status = Gtk.Label(label="")
+        self._status.set_halign(Gtk.Align.START)
+        self._status.add_css_class("dim-label")
+        root.append(self._status)
+
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        scroll.set_vexpand(True)
+        root.append(scroll)
+
+        self._view = Gtk.TextView()
+        self._view.set_editable(False)
+        self._view.set_cursor_visible(False)
+        self._view.set_monospace(True)
+        self._view.set_wrap_mode(Gtk.WrapMode.NONE)
+        scroll.set_child(self._view)
+
+        self._buf = self._view.get_buffer()
+        self._tag_error = self._buf.create_tag("log_error", foreground="#d0342c", weight=Pango.Weight.BOLD)
+        self._tag_warn = self._buf.create_tag("log_warn", foreground="#b36b00", weight=Pango.Weight.BOLD)
+        self._tag_engine = self._buf.create_tag("log_engine", foreground="#2050a0")
+        self._tag_dim = self._buf.create_tag("log_dim", foreground="#6a6a6a")
+
+        self._reload()
+        self._timer_id = GLib.timeout_add(1500, self._on_tick)
+        self.connect("close-request", self._on_close_request)
+
+    def _on_close_request(self, _win):
+        if getattr(self, "_timer_id", 0):
+            GLib.source_remove(self._timer_id)
+            self._timer_id = 0
+        return False
+
+    def _on_tick(self):
+        if self._auto_refresh:
+            self._reload()
+        return True
+
+    def _on_auto_toggled(self, sw, _param):
+        self._auto_refresh = sw.get_active()
+
+    def _on_refresh_clicked(self, _btn):
+        self._reload()
+
+    def _on_search_changed(self, entry):
+        self._query = entry.get_text().strip().lower()
+        self._render()
+
+    def _reload(self):
+        try:
+            with open(GUI_LOG_FILE, "r", encoding="utf-8", errors="replace") as f:
+                self._all_lines = f.readlines()[-3000:]
+        except OSError:
+            self._all_lines = []
+        self._render()
+
+    def _line_tags(self, line):
+        lower = line.lower()
+        tags = []
+        if "[engine]" in lower:
+            tags.append(self._tag_engine)
+        if "[system]" in lower or "[gui]" in lower:
+            tags.append(self._tag_dim)
+        if "fatal" in lower or "error" in lower or "failed" in lower:
+            tags.append(self._tag_error)
+        elif "warning" in lower or "warn" in lower:
+            tags.append(self._tag_warn)
+        return tags
+
+    def _render(self):
+        self._buf.set_text("")
+        shown = 0
+        errors = 0
+        for line in self._all_lines:
+            if self._query and self._query not in line.lower():
+                continue
+            shown += 1
+            if any(k in line.lower() for k in ("fatal", "error", "failed")):
+                errors += 1
+            end = self._buf.get_end_iter()
+            tags = self._line_tags(line)
+            if tags:
+                self._buf.insert_with_tags(end, line, *tags)
+            else:
+                self._buf.insert(end, line)
+        self._status.set_text(f"Showing {shown} lines · errors {errors}")
+
+
+########################################
 # WINDOW
 ########################################
 
@@ -1022,6 +1150,7 @@ class WallGui(Gtk.ApplicationWindow):
         self._type_filter   = ""
         self._favorites     = set()
         self._flag_checks   = {}
+        self._log_win       = None
 
         self._build_ui()
         self._show_loading_row()
@@ -1062,6 +1191,11 @@ class WallGui(Gtk.ApplicationWindow):
         playlists_btn.set_tooltip_text("Manage Playlists")
         playlists_btn.connect("clicked", self._on_playlists)
         search_bar.append(playlists_btn)
+
+        logs_btn = Gtk.Button(label="Logs")
+        logs_btn.set_tooltip_text("View wall runtime log")
+        logs_btn.connect("clicked", self._on_logs)
+        search_bar.append(logs_btn)
 
         settings_btn = Gtk.Button(label="⚙")
         settings_btn.set_tooltip_text("Settings")
@@ -1948,6 +2082,12 @@ class WallGui(Gtk.ApplicationWindow):
         """Open the playlist manager modal."""
         win = PlaylistWindow(self, self.wallpapers)
         win.present()
+
+    def _on_logs(self, _btn):
+        """Open a live log viewer with search and error highlighting."""
+        if self._log_win is None or not self._log_win.get_visible():
+            self._log_win = LogWindow(self)
+        self._log_win.present()
 
     def _on_add_to_playlist(self, _btn):
         """Show a picker to add the selected wallpaper to a playlist."""
