@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.0.11
+- Add: wall-gui Settings now includes an Engine selector (system/fork) wired to `wall use-engine`
+- Add: wall-gui Settings now shows configured/resolved engine path status to make active engine selection visible
+- Change: preserve custom `ENGINE_BIN` configs by exposing them as `custom` mode instead of overwriting on apply
+
 ## v1.0.10
 - Add: engine process output is now written to `~/.cache/wall/wall.log` with `[ENGINE]` tag (including launch stdout/stderr and scene dump-structure probe output)
 

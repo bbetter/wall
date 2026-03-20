@@ -325,14 +325,15 @@ def playlist_cmd(subcmd, *args):
 
 class SettingsWindow(Gtk.Window):
     """Modal window for editing global settings (FPS, scaling, audio, volume,
-    fullscreen-pause). Writes changes to the config file and reloads the daemon.
+    fullscreen-pause, and engine source mode. Writes changes to the config file
+    and reloads the daemon.
     """
 
     # --- Init ---
 
     def __init__(self, parent):
         super().__init__(title="Settings", transient_for=parent, modal=True)
-        self.set_default_size(400, 360)
+        self.set_default_size(460, 390)
         self.set_resizable(False)
 
         conf = load_config()
@@ -347,7 +348,8 @@ class SettingsWindow(Gtk.Window):
         note = Gtk.Label()
         note.set_markup(
             "<small>These settings apply <b>globally</b> to all wallpapers.\n"
-            "Applying will restart the wallpaper engine.</small>"
+            "Applying will restart the wallpaper engine. Switching to fork\n"
+            "downloads the latest fork binary.</small>"
         )
         note.set_halign(Gtk.Align.START)
         note.add_css_class("dim-label")
@@ -481,6 +483,40 @@ class SettingsWindow(Gtk.Window):
         fsp_hint.add_css_class("dim-label")
         grid.attach(fsp_hint, 2, 5, 1, 1)
 
+        # Engine source
+        eng_lbl = Gtk.Label(label="Engine")
+        eng_lbl.set_halign(Gtk.Align.START)
+        eng_lbl.set_tooltip_text("Choose system engine or managed fork engine")
+        grid.attach(eng_lbl, 0, 6, 1, 1)
+
+        self._engine_mode = self._detect_engine_mode(conf)
+        self._engine_opts = ["system", "fork"]
+        if self._engine_mode == "custom":
+            self._engine_opts.append("custom")
+
+        eng_model = Gtk.StringList.new(self._engine_opts)
+        self._eng_drop = Gtk.DropDown(model=eng_model)
+        self._eng_drop.set_selected(self._engine_opts.index(self._engine_mode))
+        self._eng_drop.set_tooltip_text("system: linux-wallpaperengine package · fork: ~/.local/bin/wall-engine")
+        grid.attach(self._eng_drop, 1, 6, 1, 1)
+
+        eng_hint = Gtk.Label(
+            label=(
+                "system · fork"
+                if self._engine_mode != "custom"
+                else "custom path detected (kept unless changed)"
+            )
+        )
+        eng_hint.set_halign(Gtk.Align.START)
+        eng_hint.add_css_class("dim-label")
+        grid.attach(eng_hint, 2, 6, 1, 1)
+
+        self._eng_path_lbl = Gtk.Label(label=self._engine_resolution_text(conf))
+        self._eng_path_lbl.set_halign(Gtk.Align.START)
+        self._eng_path_lbl.set_wrap(True)
+        self._eng_path_lbl.add_css_class("dim-label")
+        grid.attach(self._eng_path_lbl, 0, 7, 3, 1)
+
         apply_btn = Gtk.Button(label="Apply")
         apply_btn.add_css_class("suggested-action")
         apply_btn.connect("clicked", self._on_apply)
@@ -491,6 +527,28 @@ class SettingsWindow(Gtk.Window):
     def _on_silent_toggled(self, sw, _param):
         """Disable volume slider when silent mode is active."""
         self._vol_scale.set_sensitive(not sw.get_active())
+
+    def _detect_engine_mode(self, conf):
+        """Return engine mode: system, fork, or custom."""
+        engine_bin = (conf.get("engine_bin", "") or "").strip()
+        if not engine_bin:
+            return "system"
+        if os.path.expanduser(engine_bin) == os.path.expanduser("~/.local/bin/wall-engine"):
+            return "fork"
+        return "custom"
+
+    def _engine_resolution_text(self, conf):
+        """Build a readable engine resolution string for the settings UI."""
+        raw = (conf.get("engine_bin", "") or "").strip() or "linux-wallpaperengine"
+        expanded = os.path.expanduser(raw)
+        if "/" in raw:
+            resolved = expanded
+            exists = os.path.isfile(resolved) and os.access(resolved, os.X_OK)
+        else:
+            found = shutil.which(raw)
+            resolved = found or raw
+            exists = bool(found)
+        return f"Configured: {raw}  |  Resolved: {resolved}  ({'ok' if exists else 'missing'})"
 
     def _on_apply(self, _btn):
         """Persist all settings to the config file and reload the daemon."""
@@ -516,6 +574,12 @@ class SettingsWindow(Gtk.Window):
         with open(config_file, "w") as f:
             for k, v in conf.items():
                 f.write(f"{k}={v}\n")
+
+        engine_mode = self._engine_opts[self._eng_drop.get_selected()]
+        if engine_mode in {"system", "fork"} and engine_mode != self._engine_mode:
+            gui_log(f"settings apply: engine switch requested mode={engine_mode}")
+            wall_cmd("use-engine", engine_mode, timeout=180)
+
         gui_log(f"settings apply: updates={updates}")
         wall_cmd("reload")
         self.close()
