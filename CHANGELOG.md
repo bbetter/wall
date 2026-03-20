@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.0.15
+- Add: `wall-gui` overflow menu now includes `Copy Wallpaper ID` action
+- Add: fork engine installation now shows runtime progress stages (download/extract/finalize) with download progress output
+
 ## v1.0.14
 - Add: `wall use-engine fork` now supports bundled engine release assets (`.tar.gz/.tgz/.tar.zst`) and installs a wrapper with runtime library path setup
 - Change: fork engine files are now installed under `~/.local/share/wall/engine` with a `current` symlink for clean upgrades

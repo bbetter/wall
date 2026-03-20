@@ -1344,6 +1344,12 @@ class WallGui(Gtk.ApplicationWindow):
         self.share_btn.connect("clicked", self._on_share)
         overflow_box.append(self.share_btn)
 
+        self.copy_id_btn = Gtk.Button(label="Copy Wallpaper ID")
+        self.copy_id_btn.set_sensitive(False)
+        self.copy_id_btn.add_css_class("flat")
+        self.copy_id_btn.connect("clicked", self._on_copy_id)
+        overflow_box.append(self.copy_id_btn)
+
         self._overflow_popover = Gtk.Popover()
         self._overflow_popover.set_child(overflow_box)
         self._overflow_popover.set_has_arrow(False)
@@ -1550,6 +1556,7 @@ class WallGui(Gtk.ApplicationWindow):
         self.share_btn.set_sensitive(True)
         self.open_btn.set_sensitive(True)
         self.playlist_btn.set_sensitive(True)
+        self.copy_id_btn.set_sensitive(True)
         self._fav_btn.set_sensitive(True)
         self._fav_btn.set_label("★" if wall["id"] in self._favorites else "☆")
         self._fav_btn.set_tooltip_text(
@@ -2045,6 +2052,14 @@ class WallGui(Gtk.ApplicationWindow):
         self._overflow_popover.popdown()
         gui_log(f"copy steam url: id={self.selected_id} url={self._steam_url()}")
         Gdk.Display.get_default().get_clipboard().set(self._steam_url())
+
+    def _on_copy_id(self, _btn):
+        """Copy the selected wallpaper ID to the clipboard."""
+        if not self.selected_id:
+            return
+        self._overflow_popover.popdown()
+        gui_log(f"copy wallpaper id: id={self.selected_id}")
+        Gdk.Display.get_default().get_clipboard().set(self.selected_id)
 
     def _on_apply(self, _btn):
         """Apply the selected wallpaper: persist staged props, then launch."""

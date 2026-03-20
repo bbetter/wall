@@ -22,7 +22,7 @@
 # CONFIG
 ########################################
 
-VERSION="1.0.14"
+VERSION="1.0.15"
 
 CONFIG_FILE="$HOME/.config/wall/config"
 
@@ -123,6 +123,13 @@ install_fork_engine_from_release() {
   local ENGINE_ARCHIVE=""
   local ENGINE_FOUND_BIN=""
   local ENGINE_FOUND_DIR=""
+  local -a CURL_FLAGS=()
+
+  if [ -t 1 ]; then
+    CURL_FLAGS=(-fL --progress-bar)
+  else
+    CURL_FLAGS=(-fsL)
+  fi
 
   ENGINE_TAG=$(echo "$RELEASE_JSON" | jq -r '.tag_name // empty')
   if [ -z "$ENGINE_TAG" ]; then
@@ -142,8 +149,16 @@ install_fork_engine_from_release() {
     rm -rf "$ENGINE_TMP_DIR"
     mkdir -p "$ENGINE_TMP_DIR" "$ENGINE_HOME/releases" "$(dirname "$ENGINE_DEST")"
 
-    echo "Downloading engine bundle $ENGINE_TAG..."
-    curl -sL "$ENGINE_BUNDLE_URL" -o "$ENGINE_ARCHIVE"
+    echo "Downloading engine bundle $ENGINE_TAG ($ENGINE_BUNDLE_NAME)..."
+    echo "  This may take a while."
+    if ! curl "${CURL_FLAGS[@]}" "$ENGINE_BUNDLE_URL" -o "$ENGINE_ARCHIVE"; then
+      echo "Error: failed to download engine bundle $ENGINE_BUNDLE_NAME"
+      rm -f "$ENGINE_ARCHIVE"
+      rm -rf "$ENGINE_TMP_DIR"
+      return 1
+    fi
+
+    echo "Extracting engine bundle..."
 
     case "$ENGINE_BUNDLE_NAME" in
     *.tar.gz | *.tgz)
@@ -160,6 +175,7 @@ install_fork_engine_from_release() {
       ;;
     esac
 
+    echo "Finalizing engine install..."
     rm -f "$ENGINE_ARCHIVE"
     rm -rf "$ENGINE_RELEASE_DIR"
     mv "$ENGINE_TMP_DIR" "$ENGINE_RELEASE_DIR"
@@ -194,7 +210,11 @@ EOF
     echo "  Wrapper installed at $ENGINE_DEST"
   elif [ -n "$ENGINE_BIN_URL" ]; then
     echo "Downloading engine $ENGINE_TAG..."
-    curl -sL "$ENGINE_BIN_URL" -o "$ENGINE_DEST.tmp"
+    if ! curl "${CURL_FLAGS[@]}" "$ENGINE_BIN_URL" -o "$ENGINE_DEST.tmp"; then
+      echo "Error: failed to download engine binary"
+      rm -f "$ENGINE_DEST.tmp"
+      return 1
+    fi
     chmod +x "$ENGINE_DEST.tmp"
     mv "$ENGINE_DEST.tmp" "$ENGINE_DEST"
     echo "  Installed to $ENGINE_DEST"
