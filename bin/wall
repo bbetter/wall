@@ -22,7 +22,7 @@
 # CONFIG
 ########################################
 
-VERSION="1.0.13"
+VERSION="1.0.14"
 
 CONFIG_FILE="$HOME/.config/wall/config"
 
@@ -106,6 +106,113 @@ reload_runtime_settings() {
   VOLUME="${VOLUME:-15}"
   FULLSCREEN_PAUSE="${FULLSCREEN_PAUSE:-0}"
   ENGINE_BIN="${ENGINE_BIN:-linux-wallpaperengine}"
+}
+
+# Install fork engine from a GitHub release payload.
+# Prefers bundled runtime assets; falls back to a single binary asset.
+install_fork_engine_from_release() {
+  local RELEASE_JSON="$1"
+  local ENGINE_DEST="$HOME/.local/bin/wall-engine"
+  local ENGINE_HOME="$HOME/.local/share/wall/engine"
+  local ENGINE_TAG=""
+  local ENGINE_BUNDLE_URL=""
+  local ENGINE_BUNDLE_NAME=""
+  local ENGINE_BIN_URL=""
+  local ENGINE_RELEASE_DIR=""
+  local ENGINE_TMP_DIR=""
+  local ENGINE_ARCHIVE=""
+  local ENGINE_FOUND_BIN=""
+  local ENGINE_FOUND_DIR=""
+
+  ENGINE_TAG=$(echo "$RELEASE_JSON" | jq -r '.tag_name // empty')
+  if [ -z "$ENGINE_TAG" ]; then
+    echo "Error: could not fetch engine release from GitHub"
+    return 1
+  fi
+
+  ENGINE_BUNDLE_URL=$(echo "$RELEASE_JSON" | jq -r '[.assets[]? | select(.name | test("^linux-wallpaperengine.*\\.(tar\\.gz|tgz|tar\\.zst)$"))][0].browser_download_url // empty')
+  ENGINE_BUNDLE_NAME=$(echo "$RELEASE_JSON" | jq -r '[.assets[]? | select(.name | test("^linux-wallpaperengine.*\\.(tar\\.gz|tgz|tar\\.zst)$"))][0].name // empty')
+  ENGINE_BIN_URL=$(echo "$RELEASE_JSON" | jq -r '[.assets[]? | select(.name == "linux-wallpaperengine")][0].browser_download_url // empty')
+
+  if [ -n "$ENGINE_BUNDLE_URL" ] && [ -n "$ENGINE_BUNDLE_NAME" ]; then
+    ENGINE_RELEASE_DIR="$ENGINE_HOME/releases/$ENGINE_TAG"
+    ENGINE_TMP_DIR="$ENGINE_RELEASE_DIR.tmp"
+    ENGINE_ARCHIVE="$ENGINE_HOME/$ENGINE_BUNDLE_NAME"
+
+    rm -rf "$ENGINE_TMP_DIR"
+    mkdir -p "$ENGINE_TMP_DIR" "$ENGINE_HOME/releases" "$(dirname "$ENGINE_DEST")"
+
+    echo "Downloading engine bundle $ENGINE_TAG..."
+    curl -sL "$ENGINE_BUNDLE_URL" -o "$ENGINE_ARCHIVE"
+
+    case "$ENGINE_BUNDLE_NAME" in
+    *.tar.gz | *.tgz)
+      tar -xzf "$ENGINE_ARCHIVE" -C "$ENGINE_TMP_DIR"
+      ;;
+    *.tar.zst)
+      tar --zstd -xf "$ENGINE_ARCHIVE" -C "$ENGINE_TMP_DIR"
+      ;;
+    *)
+      echo "Error: unsupported engine bundle format: $ENGINE_BUNDLE_NAME"
+      rm -f "$ENGINE_ARCHIVE"
+      rm -rf "$ENGINE_TMP_DIR"
+      return 1
+      ;;
+    esac
+
+    rm -f "$ENGINE_ARCHIVE"
+    rm -rf "$ENGINE_RELEASE_DIR"
+    mv "$ENGINE_TMP_DIR" "$ENGINE_RELEASE_DIR"
+
+    ENGINE_FOUND_BIN=$(find "$ENGINE_RELEASE_DIR" -type f -name "linux-wallpaperengine" | head -n1)
+    if [ -z "$ENGINE_FOUND_BIN" ]; then
+      echo "Error: linux-wallpaperengine binary not found in bundle $ENGINE_BUNDLE_NAME"
+      return 1
+    fi
+
+    chmod +x "$ENGINE_FOUND_BIN" 2>/dev/null || true
+    ENGINE_FOUND_DIR=$(dirname "$ENGINE_FOUND_BIN")
+    ln -sfn "$ENGINE_FOUND_DIR" "$ENGINE_HOME/current"
+
+    cat >"$ENGINE_DEST" <<'EOF'
+#!/usr/bin/env bash
+ENGINE_DIR="$HOME/.local/share/wall/engine/current"
+ENGINE_BIN="$ENGINE_DIR/linux-wallpaperengine"
+
+if [ ! -x "$ENGINE_BIN" ]; then
+  echo "wall-engine: missing engine binary at $ENGINE_BIN" >&2
+  exit 1
+fi
+
+export LD_LIBRARY_PATH="$ENGINE_DIR:${LD_LIBRARY_PATH:-}"
+cd "$ENGINE_DIR" || exit 1
+exec "$ENGINE_BIN" "$@"
+EOF
+    chmod +x "$ENGINE_DEST"
+
+    echo "  Installed bundle to $ENGINE_FOUND_DIR"
+    echo "  Wrapper installed at $ENGINE_DEST"
+  elif [ -n "$ENGINE_BIN_URL" ]; then
+    echo "Downloading engine $ENGINE_TAG..."
+    curl -sL "$ENGINE_BIN_URL" -o "$ENGINE_DEST.tmp"
+    chmod +x "$ENGINE_DEST.tmp"
+    mv "$ENGINE_DEST.tmp" "$ENGINE_DEST"
+    echo "  Installed to $ENGINE_DEST"
+  else
+    echo "Error: no compatible engine asset found in release $ENGINE_TAG"
+    return 1
+  fi
+
+  mkdir -p "$(dirname "$CONFIG_FILE")"
+  if grep -q "^ENGINE_BIN=" "$CONFIG_FILE" 2>/dev/null; then
+    sed -i "s|^ENGINE_BIN=.*|ENGINE_BIN=$ENGINE_DEST|" "$CONFIG_FILE"
+  else
+    echo "ENGINE_BIN=$ENGINE_DEST" >>"$CONFIG_FILE"
+  fi
+
+  log "use-engine fork: installed $ENGINE_DEST tag=$ENGINE_TAG"
+  echo "  Switched to fork engine ($ENGINE_TAG)"
+  return 0
 }
 
 # Log resolved config and paths once at startup (aids debugging).
@@ -1394,7 +1501,6 @@ version)
   ;;
 
 use-engine)
-  _ENGINE_DEST="$HOME/.local/bin/wall-engine"
   _ENGINE_REPO="bbetter/linux-wallpaperengine"
   _MODE="${2:-}"
 
@@ -1408,26 +1514,10 @@ use-engine)
       echo "Error: could not fetch engine release from GitHub"
       exit 1
     fi
-    _ENGINE_URL=$(echo "$_ENGINE_RELEASE" | jq -r '.assets[] | select(.name == "linux-wallpaperengine") | .browser_download_url')
-    if [ -z "$_ENGINE_URL" ]; then
-      echo "Error: binary asset not found in release $_ENGINE_TAG"
+    if ! install_fork_engine_from_release "$_ENGINE_RELEASE"; then
       echo "Make sure a release exists at github.com/$_ENGINE_REPO/releases"
       exit 1
     fi
-    echo "Downloading engine $_ENGINE_TAG..."
-    curl -sL "$_ENGINE_URL" -o "$_ENGINE_DEST.tmp"
-    chmod +x "$_ENGINE_DEST.tmp"
-    mv "$_ENGINE_DEST.tmp" "$_ENGINE_DEST"
-    echo "  Installed to $_ENGINE_DEST"
-
-    mkdir -p "$(dirname "$CONFIG_FILE")"
-    if grep -q "^ENGINE_BIN=" "$CONFIG_FILE" 2>/dev/null; then
-      sed -i "s|^ENGINE_BIN=.*|ENGINE_BIN=$_ENGINE_DEST|" "$CONFIG_FILE"
-    else
-      echo "ENGINE_BIN=$_ENGINE_DEST" >>"$CONFIG_FILE"
-    fi
-    echo "  Switched to fork engine ($_ENGINE_TAG)"
-    log "use-engine fork: installed $_ENGINE_DEST tag=$_ENGINE_TAG"
     is_running && echo "  Restart to apply: wall reload" || true
     ;;
 
@@ -1513,14 +1603,10 @@ update)
     echo "Updating fork engine..."
     _ENGINE_RELEASE=$(curl -s "https://api.github.com/repos/bbetter/linux-wallpaperengine/releases/latest")
     _ENGINE_TAG=$(echo "$_ENGINE_RELEASE" | jq -r '.tag_name // empty')
-    _ENGINE_URL=$(echo "$_ENGINE_RELEASE" | jq -r '.assets[] | select(.name == "linux-wallpaperengine") | .browser_download_url')
-    if [ -n "$_ENGINE_URL" ]; then
-      curl -sL "$_ENGINE_URL" -o "$_ENGINE_DEST.tmp"
-      chmod +x "$_ENGINE_DEST.tmp"
-      mv "$_ENGINE_DEST.tmp" "$_ENGINE_DEST"
+    if install_fork_engine_from_release "$_ENGINE_RELEASE"; then
       echo "  Engine updated to $_ENGINE_TAG"
     else
-      echo "  Warning: could not fetch engine binary (no release asset found)"
+      echo "  Warning: could not fetch/install fork engine from latest release"
     fi
   fi
 

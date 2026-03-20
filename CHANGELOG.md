@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.0.14
+- Add: `wall use-engine fork` now supports bundled engine release assets (`.tar.gz/.tgz/.tar.zst`) and installs a wrapper with runtime library path setup
+- Change: fork engine files are now installed under `~/.local/share/wall/engine` with a `current` symlink for clean upgrades
+- Change: `wall update` now refreshes fork engine via the same bundle-aware installer logic (with legacy single-binary fallback)
+
 ## v1.0.13
 - Fix: auto-reload stale daemons by comparing running daemon version vs CLI version before sending commands
 - Add: daemon version tracking file (`~/.cache/wall/daemon.version`) to keep GUI/CLI commands aligned after upgrades
