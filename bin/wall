@@ -122,7 +122,7 @@ wait_for_steam() {
 
     [ -d "$WORKSHOP_DIR" ] && return
 
-    if [ $(date +%s) -ge "$DEADLINE" ]; then
+    if (( $(date +%s) >= DEADLINE )); then
       log "WARNING: SteamLibrary not found after ${STEAM_WAIT_TIMEOUT:-30}s at $WORKSHOP_DIR — continuing anyway"
       return 1
     fi
