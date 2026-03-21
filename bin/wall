@@ -22,7 +22,7 @@
 # CONFIG
 ########################################
 
-VERSION="1.1.0"
+VERSION="1.1.1"
 
 CONFIG_FILE="$HOME/.config/wall/config"
 
@@ -1766,10 +1766,13 @@ update)
   _ENGINE_DEST="$HOME/.local/bin/wall-engine"
   if [ -f "$_ENGINE_DEST" ]; then
     echo ""
-    echo "Updating fork engine..."
+    echo "Checking fork engine..."
     _ENGINE_RELEASE=$(curl -s "https://api.github.com/repos/bbetter/linux-wallpaperengine/releases/latest")
     _ENGINE_TAG=$(echo "$_ENGINE_RELEASE" | jq -r '.tag_name // empty')
-    if install_fork_engine_from_release "$_ENGINE_RELEASE"; then
+    _ENGINE_RELEASE_DIR="$HOME/.local/share/wall/engine/releases/$_ENGINE_TAG"
+    if [ -d "$_ENGINE_RELEASE_DIR" ]; then
+      echo "  Engine already up to date ($_ENGINE_TAG)"
+    elif install_fork_engine_from_release "$_ENGINE_RELEASE"; then
       echo "  Engine updated to $_ENGINE_TAG"
     else
       echo "  Warning: could not fetch/install fork engine from latest release"
