@@ -33,7 +33,6 @@ echo "Installing dependencies..."
 yay -S --needed \
   jq \
   ffmpeg \
-  mpv \
   linux-wallpaperengine \
   python-gobject \
   gtk4
@@ -121,6 +120,15 @@ echo "Writing config..."
 echo "STEAM_LIB=$STEAM_APPS" >"$CONFIG_FILE"
 
 ########################################
+# fork engine
+########################################
+
+echo
+echo "Installing fork engine..."
+
+"$HOME/.local/bin/wall" use-engine fork
+
+########################################
 # shell setup (PATH + alias)
 # /usr/bin/wall conflict: a binary named
 # 'wall' already exists on Linux systems.
@@ -203,9 +211,14 @@ echo
 echo "  SteamLibrary: $STEAM_PATH"
 echo
 echo "Commands:"
-echo "  wall random"
-echo "  wall list"
-echo "  wall-picker"
+echo "  wall random                    — set random wallpaper"
+echo "  wall list                      — list available wallpapers"
+echo "  wall cycle [seconds]           — cycle wallpapers on a timer"
+echo "  wall status                    — show current wallpaper per monitor"
+echo "  wall update                    — update wall and engine to latest"
+echo "  wall use-engine <fork|system>  — switch engine binary"
+echo "  wall-picker                    — open wallpaper picker"
+echo "  wall-gui                       — open graphical interface"
 echo
 echo "Reload your shell:"
 echo "  source ~/.bashrc              # bash"
