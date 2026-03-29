@@ -22,7 +22,7 @@
 # CONFIG
 ########################################
 
-VERSION="1.1.2"
+VERSION="1.1.3"
 
 CONFIG_FILE="$HOME/.config/wall/config"
 
@@ -819,6 +819,10 @@ next_wallpaper_for() {
     fi
   else
     load_walls
+    if [ "$TOTAL" -eq 0 ]; then
+      log "next_wallpaper_for $MON: no wallpapers available"
+      return 1
+    fi
   fi
 
   if [ "$MODE" = "shuffle" ] || [ "$MODE" = "playlist_shuffle" ]; then
@@ -884,12 +888,22 @@ prev_wallpaper_for() {
     fi
   else
     load_walls
+    if [ "$TOTAL" -eq 0 ]; then
+      log "prev_wallpaper_for $MON: no wallpapers available"
+      return 1
+    fi
   fi
 
   if [ "$MODE" = "shuffle" ] || [ "$MODE" = "playlist_shuffle" ]; then
 
     local -a SHUFFLE_IDX
     mapfile -t SHUFFLE_IDX <"$D/shuffle" 2>/dev/null
+
+    # Rebuild shuffle list if missing (e.g. first prev in shuffle mode)
+    if [ "${#SHUFFLE_IDX[@]}" -eq 0 ]; then
+      build_shuffle_for "$MON"
+      mapfile -t SHUFFLE_IDX <"$D/shuffle"
+    fi
 
     local POS
     POS=$(cat "$D/index" 2>/dev/null || echo 0)
@@ -1141,7 +1155,13 @@ daemon_loop() {
     _MON_NAME=$(basename "$_MON_PATH")
     _CURRENT=$(cat "${_MON_PATH}current" 2>/dev/null)
     [ -z "$_CURRENT" ] && continue
-    [ -d "$WORKSHOP_DIR/$_CURRENT" ] || continue
+    if [ ! -d "$WORKSHOP_DIR/$_CURRENT" ]; then
+      log "Wallpaper $_CURRENT missing, clearing state for $_MON_NAME"
+      rm -f "${_MON_PATH}current" "${_MON_PATH}mode" "${_MON_PATH}index" \
+            "${_MON_PATH}pid" "${_MON_PATH}shuffle" "${_MON_PATH}playlist" \
+            "${_MON_PATH}next_tick"
+      continue
+    fi
     log "Restoring wallpaper on $_MON_NAME: $_CURRENT"
     launch_on_monitor "$WORKSHOP_DIR/$_CURRENT" "$_MON_NAME"
     _MODE=$(cat "${_MON_PATH}mode" 2>/dev/null)
@@ -1166,8 +1186,9 @@ daemon_loop() {
     if [ -f "$CMD_FILE" ]; then
 
       local CMD MON_ARG
-      read -r CMD MON_ARG <"$CMD_FILE"
-      rm "$CMD_FILE"
+      mv "$CMD_FILE" "${CMD_FILE}.processing" 2>/dev/null || continue
+      read -r CMD MON_ARG <"${CMD_FILE}.processing"
+      rm "${CMD_FILE}.processing"
       load_daemon_env
 
       log "Command received: $CMD${MON_ARG:+ $MON_ARG}"
@@ -1625,8 +1646,11 @@ prop)
     PROP_VAL="${PROP_SET_KV#*=}"
     mkdir -p "$PROPS_DIR"
     PROP_FILE="$PROPS_DIR/$PROP_SET_ID"
-    if grep -q "^${PROP_KEY}=" "$PROP_FILE" 2>/dev/null; then
-      sed -i "s|^${PROP_KEY}=.*|${PROP_KEY}=${PROP_VAL}|" "$PROP_FILE"
+    if grep -qF "${PROP_KEY}=" "$PROP_FILE" 2>/dev/null; then
+      local _pk _pv
+      _pk=$(printf '%s' "$PROP_KEY" | sed 's/[|\\&]/\\&/g')
+      _pv=$(printf '%s' "$PROP_VAL" | sed 's/[|\\&]/\\&/g')
+      sed -i "s|^${_pk}=.*|${_pk}=${_pv}|" "$PROP_FILE"
     else
       echo "${PROP_KEY}=${PROP_VAL}" >>"$PROP_FILE"
     fi
@@ -1872,8 +1896,11 @@ set)
   mkdir -p "$(dirname "$CONFIG_FILE")"
   CONF_KEY="${KEY^^}"
 
-  if grep -q "^${CONF_KEY}=" "$CONFIG_FILE" 2>/dev/null; then
-    sed -i "s|^${CONF_KEY}=.*|${CONF_KEY}=${VAL}|" "$CONFIG_FILE"
+  if grep -qF "${CONF_KEY}=" "$CONFIG_FILE" 2>/dev/null; then
+    local _ck _cv
+    _ck=$(printf '%s' "$CONF_KEY" | sed 's/[|\\&]/\\&/g')
+    _cv=$(printf '%s' "$VAL" | sed 's/[|\\&]/\\&/g')
+    sed -i "s|^${_ck}=.*|${_ck}=${_cv}|" "$CONFIG_FILE"
   else
     echo "${CONF_KEY}=${VAL}" >>"$CONFIG_FILE"
   fi
@@ -1929,7 +1956,7 @@ include)
     exit 1
   fi
   if [ -f "$EXCLUDED_FILE" ]; then
-    sed -i "/^${INC_ID}$/d" "$EXCLUDED_FILE"
+    grep -vxF "$INC_ID" "$EXCLUDED_FILE" >"${EXCLUDED_FILE}.tmp" && mv "${EXCLUDED_FILE}.tmp" "$EXCLUDED_FILE"
   fi
   echo "Included $INC_ID in random/cycle/shuffle"
   ;;
@@ -1989,7 +2016,7 @@ playlist)
     shift 3
     for ID in "$@"; do
       if grep -qxF "$ID" "$PFILE" 2>/dev/null; then
-        sed -i "/^${ID}$/d" "$PFILE"
+        grep -vxF "$ID" "$PFILE" >"${PFILE}.tmp" && mv "${PFILE}.tmp" "$PFILE"
         echo "Removed $ID from '$NAME'"
       else
         echo "$ID not in playlist '$NAME'"
