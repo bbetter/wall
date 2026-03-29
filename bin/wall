@@ -22,7 +22,7 @@
 # CONFIG
 ########################################
 
-VERSION="1.1.1"
+VERSION="1.1.2"
 
 CONFIG_FILE="$HOME/.config/wall/config"
 
@@ -1206,11 +1206,14 @@ daemon_loop() {
         ;;
       playlist_play)
         # MON_ARG = "PLAYLIST_NAME" or "PLAYLIST_NAME MONITOR"
-        # Split on first space; if no space, PL_MON equals PL_NAME (reset to "")
         local PL_NAME PL_MON
-        PL_NAME="${MON_ARG%% *}"
-        PL_MON="${MON_ARG#* }"
-        [ "$PL_MON" = "$PL_NAME" ] && PL_MON=""
+        if [[ "$MON_ARG" == *' '* ]]; then
+          PL_NAME="${MON_ARG%% *}"
+          PL_MON="${MON_ARG#* }"
+        else
+          PL_NAME="$MON_ARG"
+          PL_MON=""
+        fi
         local -a PL_TARGET_MONS
         if [ -n "$PL_MON" ]; then
           PL_TARGET_MONS=("$PL_MON")
@@ -1227,9 +1230,13 @@ daemon_loop() {
       playlist_shuffle)
         # MON_ARG = "PLAYLIST_NAME" or "PLAYLIST_NAME MONITOR"
         local PL_NAME PL_MON
-        PL_NAME="${MON_ARG%% *}"
-        PL_MON="${MON_ARG#* }"
-        [ "$PL_MON" = "$PL_NAME" ] && PL_MON=""
+        if [[ "$MON_ARG" == *' '* ]]; then
+          PL_NAME="${MON_ARG%% *}"
+          PL_MON="${MON_ARG#* }"
+        else
+          PL_NAME="$MON_ARG"
+          PL_MON=""
+        fi
         local -a PL_TARGET_MONS
         if [ -n "$PL_MON" ]; then
           PL_TARGET_MONS=("$PL_MON")
