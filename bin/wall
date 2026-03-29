@@ -22,7 +22,7 @@
 # CONFIG
 ########################################
 
-VERSION="1.1.3"
+VERSION="1.1.4"
 
 CONFIG_FILE="$HOME/.config/wall/config"
 
@@ -479,6 +479,11 @@ mon_state_dir() {
 # STOP
 ########################################
 
+# Load per-monitor tag filter into the TAG_FILTER global for use by load_walls.
+_set_tag_filter() {
+  TAG_FILTER=$(cat "$(mon_state_dir "$1")/tag_filter" 2>/dev/null || echo "")
+}
+
 # Kill the wallpaper process on a single monitor and clean up its PID file.
 stop_monitor() {
 
@@ -600,7 +605,14 @@ cache_valid() {
 
   [ -f "$CACHE_FILE" ] || return 1
 
-  [ -z "$(find "$WORKSHOP_DIR" -name "project.json" -newer "$CACHE_FILE" -print -quit 2>/dev/null)" ]
+  [ -z "$(find "$WORKSHOP_DIR" -name "project.json" -newer "$CACHE_FILE" -print -quit 2>/dev/null)" ] || return 1
+
+  if [ -f "${CACHE_FILE}.count" ]; then
+    local STORED_COUNT CURRENT_COUNT
+    STORED_COUNT=$(cat "${CACHE_FILE}.count")
+    CURRENT_COUNT=$(find "$WORKSHOP_DIR" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | wc -l)
+    [ "$STORED_COUNT" -eq "$CURRENT_COUNT" ] || return 1
+  fi
 
 }
 
@@ -637,8 +649,12 @@ build_list_cache() {
 
   done | sort >"$tmp" && mv "$tmp" "$CACHE_FILE"
 
+  local DIR_COUNT
+  DIR_COUNT=$(find "$WORKSHOP_DIR" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | wc -l)
+  echo "$DIR_COUNT" >"${CACHE_FILE}.count"
+
   CACHE_COUNT=$(wc -l <"$CACHE_FILE")
-  log "List cache built ($CACHE_COUNT entries)"
+  log "List cache built ($CACHE_COUNT entries, $DIR_COUNT dirs)"
 
 }
 
@@ -658,16 +674,26 @@ load_walls() {
 
   ensure_cache
 
+  local -A _EXCLUDED=()
+  if [ -f "$EXCLUDED_FILE" ]; then
+    while IFS= read -r _ex_id; do
+      [ -n "$_ex_id" ] && _EXCLUDED["$_ex_id"]=1
+    done <"$EXCLUDED_FILE"
+  fi
+
   mapfile -t WALLS < <(
-    while IFS=$'\t' read -r ID _; do
-      grep -qxF "$ID" "$EXCLUDED_FILE" 2>/dev/null && continue
+    while IFS=$'\t' read -r ID _TITLE TAGS _; do
+      [ "${_EXCLUDED[$ID]+_}" ] && continue
+      if [ -n "${TAG_FILTER:-}" ]; then
+        echo "$TAGS" | grep -qiF "$TAG_FILTER" || continue
+      fi
       echo "$WORKSHOP_DIR/$ID"
     done <"$CACHE_FILE"
   )
 
   TOTAL=${#WALLS[@]}
 
-  log "Loaded wallpapers: $TOTAL"
+  log "Loaded wallpapers: $TOTAL${TAG_FILTER:+ (tag: $TAG_FILTER)}"
 
 }
 
@@ -818,7 +844,9 @@ next_wallpaper_for() {
       return 1
     fi
   else
+    _set_tag_filter "$MON"
     load_walls
+    TAG_FILTER=""
     if [ "$TOTAL" -eq 0 ]; then
       log "next_wallpaper_for $MON: no wallpapers available"
       return 1
@@ -887,7 +915,9 @@ prev_wallpaper_for() {
       return 1
     fi
   else
+    _set_tag_filter "$MON"
     load_walls
+    TAG_FILTER=""
     if [ "$TOTAL" -eq 0 ]; then
       log "prev_wallpaper_for $MON: no wallpapers available"
       return 1
@@ -947,7 +977,9 @@ random_wallpaper_for() {
   echo "idle" >"$D/mode"
   rm -f "$D/next_tick"
 
+  _set_tag_filter "$MON"
   load_walls
+  TAG_FILTER=""
 
   local IDX
   IDX=$((RANDOM % TOTAL))
@@ -1000,7 +1032,9 @@ start_shuffle_for() {
 
   echo "shuffle" >"$D/mode"
 
+  _set_tag_filter "$MON"
   load_walls
+  TAG_FILTER=""
   build_shuffle_for "$MON"
 
   echo "-1" >"$D/index"
@@ -1139,6 +1173,10 @@ daemon_loop() {
   echo "$VERSION" >"$DAEMON_VERSION_FILE"
 
   trap 'stop_wallpapers; rm -f "$PIDFILE" "$DAEMON_VERSION_FILE"; exit' TERM INT
+
+  local _USE_INOTIFY=0
+  command -v inotifywait >/dev/null 2>&1 && _USE_INOTIFY=1
+  log "inotifywait: ${_USE_INOTIFY} (fast command pickup: $([ "$_USE_INOTIFY" -eq 1 ] && echo yes || echo no, install inotify-tools to enable))"
 
   if [ -f "$LOGFILE" ]; then
     tail -n 1000 "$LOGFILE" >"$LOGFILE.tmp" && mv "$LOGFILE.tmp" "$LOGFILE"
@@ -1290,21 +1328,39 @@ daemon_loop() {
 
       local MODE
       MODE=$(cat "${MON_PATH}mode" 2>/dev/null)
-      [ "$MODE" = "cycle" ] || [ "$MODE" = "shuffle" ] ||
-        [ "$MODE" = "playlist" ] || [ "$MODE" = "playlist_shuffle" ] || continue
 
-      local TICK
-      TICK=$(cat "${MON_PATH}next_tick" 2>/dev/null)
-      [ -z "$TICK" ] && continue
+      if [ "$MODE" = "cycle" ] || [ "$MODE" = "shuffle" ] ||
+        [ "$MODE" = "playlist" ] || [ "$MODE" = "playlist_shuffle" ]; then
 
-      if [ "$NOW" -ge "$TICK" ]; then
-        log "Tick expired for $MON_NAME"
-        next_wallpaper_for "$MON_NAME"
+        local TICK
+        TICK=$(cat "${MON_PATH}next_tick" 2>/dev/null)
+        if [ -n "$TICK" ] && [ "$NOW" -ge "$TICK" ]; then
+          log "Tick expired for $MON_NAME"
+          next_wallpaper_for "$MON_NAME"
+          continue
+        fi
+      fi
+
+      # Crash recovery: relaunch if engine died unexpectedly
+      if [ -n "$MODE" ] && [ "$MODE" != "idle" ]; then
+        local ENGINE_PID_FILE="${MON_PATH}pid"
+        if [ -f "$ENGINE_PID_FILE" ]; then
+          local ENGINE_PID
+          ENGINE_PID=$(cat "$ENGINE_PID_FILE" 2>/dev/null)
+          if [ -n "$ENGINE_PID" ] && ! kill -0 "$ENGINE_PID" 2>/dev/null; then
+            log "Engine died on $MON_NAME (pid $ENGINE_PID), relaunching"
+            next_wallpaper_for "$MON_NAME"
+          fi
+        fi
       fi
     done
     shopt -u nullglob
 
-    sleep 0.5
+    if [ "${_USE_INOTIFY:-0}" -eq 1 ]; then
+      inotifywait -q -e create,moved_to "$STATE_DIR" --timeout 1 2>/dev/null || true
+    else
+      sleep 0.5
+    fi
 
   done
 
@@ -1404,12 +1460,30 @@ prev)
 
 cycle)
   echo "${2:-300}" >"$CYCLE_FILE"
+  if [ -n "${3:-}" ]; then
+    mkdir -p "$MON_DIR/${3}"
+    if [ -n "${4:-}" ]; then
+      echo "${4}" >"$MON_DIR/${3}/tag_filter"
+      log "cycle command: tag filter '${4}' set for ${3}"
+    else
+      rm -f "$MON_DIR/${3}/tag_filter"
+    fi
+  fi
   log "cycle command interval=${2:-300}"
   send_cmd cycle "${3:-}"
   ;;
 
 shuffle)
   echo "${2:-300}" >"$CYCLE_FILE"
+  if [ -n "${3:-}" ]; then
+    mkdir -p "$MON_DIR/${3}"
+    if [ -n "${4:-}" ]; then
+      echo "${4}" >"$MON_DIR/${3}/tag_filter"
+      log "shuffle command: tag filter '${4}' set for ${3}"
+    else
+      rm -f "$MON_DIR/${3}/tag_filter"
+    fi
+  fi
   log "shuffle command interval=${2:-300}"
   send_cmd shuffle "${3:-}"
   ;;
@@ -1917,19 +1991,33 @@ set)
 cache)
   case "${2:-rebuild}" in
   clear)
-    rm -f "$CACHE_FILE"
+    rm -f "$CACHE_FILE" "${CACHE_FILE}.count"
     echo "Cache cleared"
     ;;
   rebuild)
     wait_for_steam
-    rm -f "$CACHE_FILE"
+    rm -f "$CACHE_FILE" "${CACHE_FILE}.count"
     echo "Building cache..."
     build_list_cache
     CACHE_COUNT=$(wc -l <"$CACHE_FILE")
     echo "Cache rebuilt ($CACHE_COUNT entries)"
     ;;
+  status)
+    if [ -f "$CACHE_FILE" ]; then
+      CACHE_COUNT=$(wc -l <"$CACHE_FILE")
+      CACHE_AGE=$(( $(date +%s) - $(stat -c %Y "$CACHE_FILE") ))
+      echo "Cache: $CACHE_COUNT entries, ${CACHE_AGE}s old"
+      if cache_valid; then
+        echo "Status: valid"
+      else
+        echo "Status: stale (rebuild with: wall cache rebuild)"
+      fi
+    else
+      echo "Cache: not built (run: wall cache rebuild)"
+    fi
+    ;;
   *)
-    echo "Usage: wall cache [clear|rebuild]"
+    echo "Usage: wall cache [clear|rebuild|status]"
     ;;
   esac
   ;;
@@ -2078,10 +2166,15 @@ playlist)
 
   play)
     NAME="${3:-}"
-    [ -z "$NAME" ] && {
-      echo "Usage: wall playlist play <name> [seconds] [monitor]" >&2
-      exit 1
-    }
+    if [ -z "$NAME" ]; then
+      if [ -d "$PLAYLISTS_DIR" ] && compgen -G "$PLAYLISTS_DIR/*" >/dev/null 2>&1; then
+        echo "Available playlists:"
+        ls "$PLAYLISTS_DIR" | sed 's/^/  /'
+      else
+        echo "No playlists found. Create one with: wall playlist create <name>"
+      fi
+      exit 0
+    fi
     PFILE="$PLAYLISTS_DIR/$NAME"
     [ -f "$PFILE" ] || {
       echo "Playlist '$NAME' not found" >&2
@@ -2094,10 +2187,15 @@ playlist)
 
   shuffle)
     NAME="${3:-}"
-    [ -z "$NAME" ] && {
-      echo "Usage: wall playlist shuffle <name> [seconds] [monitor]" >&2
-      exit 1
-    }
+    if [ -z "$NAME" ]; then
+      if [ -d "$PLAYLISTS_DIR" ] && compgen -G "$PLAYLISTS_DIR/*" >/dev/null 2>&1; then
+        echo "Available playlists:"
+        ls "$PLAYLISTS_DIR" | sed 's/^/  /'
+      else
+        echo "No playlists found. Create one with: wall playlist create <name>"
+      fi
+      exit 0
+    fi
     PFILE="$PLAYLISTS_DIR/$NAME"
     [ -f "$PFILE" ] || {
       echo "Playlist '$NAME' not found" >&2
