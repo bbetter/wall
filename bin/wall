@@ -501,7 +501,7 @@ stop_monitor() {
 
 }
 
-# Stop wallpaper processes on all monitors, plus a pkill safety net.
+# Stop wallpaper processes on all monitors.
 stop_wallpapers() {
 
   log "Stopping all wallpapers"
@@ -511,9 +511,6 @@ stop_wallpapers() {
     stop_monitor "$(basename "$MON_PATH")"
   done
   shopt -u nullglob
-
-  # Safety net for processes started before per-monitor PID tracking
-  pkill -f "$(basename "$ENGINE_BIN")" 2>/dev/null
 
 }
 
