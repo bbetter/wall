@@ -22,7 +22,7 @@
 # CONFIG
 ########################################
 
-VERSION="1.1.4"
+VERSION="1.1.5"
 
 CONFIG_FILE="$HOME/.config/wall/config"
 
@@ -1422,14 +1422,15 @@ daemon)
 
 start)
 
-  if is_running; then
-    exit 0
-  fi
-
-  log "Starting daemon"
-  snapshot_daemon_env
-
-  nohup "$0" daemon >/dev/null 2>&1 &
+  (
+    flock -n 9 || exit 0
+    if is_running; then
+      exit 0
+    fi
+    log "Starting daemon"
+    snapshot_daemon_env
+    nohup "$0" daemon >/dev/null 2>&1 &
+  ) 9>"$STATE_DIR/.start.lock"
   ;;
 
 reload)

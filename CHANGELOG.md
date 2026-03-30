@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.1.5
+- Fix: race condition causing multiple daemon instances to spawn when concurrent commands were issued simultaneously, resulting in duplicate engine processes per monitor
+
 ## v1.0.15
 - Add: `wall-gui` overflow menu now includes `Copy Wallpaper ID` action
 - Add: fork engine installation now shows runtime progress stages (download/extract/finalize) with download progress output
