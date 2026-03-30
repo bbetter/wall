@@ -1759,7 +1759,6 @@ prop)
     mkdir -p "$PROPS_DIR"
     PROP_FILE="$PROPS_DIR/$PROP_SET_ID"
     if grep -qF "${PROP_KEY}=" "$PROP_FILE" 2>/dev/null; then
-      local _pk _pv
       _pk=$(printf '%s' "$PROP_KEY" | sed 's/[|\\&]/\\&/g')
       _pv=$(printf '%s' "$PROP_VAL" | sed 's/[|\\&]/\\&/g')
       sed -i "s|^${_pk}=.*|${_pk}=${_pv}|" "$PROP_FILE"
@@ -2009,7 +2008,6 @@ set)
   CONF_KEY="${KEY^^}"
 
   if grep -qF "${CONF_KEY}=" "$CONFIG_FILE" 2>/dev/null; then
-    local _ck _cv
     _ck=$(printf '%s' "$CONF_KEY" | sed 's/[|\\&]/\\&/g')
     _cv=$(printf '%s' "$VAL" | sed 's/[|\\&]/\\&/g')
     sed -i "s|^${_ck}=.*|${_ck}=${_cv}|" "$CONFIG_FILE"
