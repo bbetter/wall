@@ -56,6 +56,7 @@ CHECKS_DIR="$STATE_DIR/checks"
 
 PIDFILE="$STATE_DIR/daemon.pid"
 CMD_FILE="$STATE_DIR/cmd"
+CMD_QUEUE_DIR="$STATE_DIR/cmd.d"
 LOGFILE="$STATE_DIR/wall.log"
 DAEMON_VERSION_FILE="$STATE_DIR/daemon.version"
 DAEMON_ENV_FILE="$STATE_DIR/daemon.env"
@@ -70,7 +71,7 @@ PLAYLISTS_DIR="$HOME/.config/wall/playlists"
 # DEFAULTS
 ########################################
 
-mkdir -p "$STATE_DIR" "$MON_DIR"
+mkdir -p "$STATE_DIR" "$MON_DIR" "$CMD_QUEUE_DIR"
 
 ########################################
 # UTILS
@@ -1196,7 +1197,7 @@ daemon_loop() {
   echo $$ >"$PIDFILE"
   echo "$VERSION" >"$DAEMON_VERSION_FILE"
 
-  trap 'stop_wallpapers; rm -f "$PIDFILE" "$DAEMON_VERSION_FILE"; exit' TERM INT
+  trap 'stop_wallpapers; rm -f "$PIDFILE" "$DAEMON_VERSION_FILE"; rm -f "$CMD_QUEUE_DIR"/*; exit' TERM INT
 
   local _USE_INOTIFY=0
   command -v inotifywait >/dev/null 2>&1 && _USE_INOTIFY=1
@@ -1245,12 +1246,23 @@ daemon_loop() {
     # COMMAND HANDLING
     ################################
 
-    if [ -f "$CMD_FILE" ]; then
+    shopt -s nullglob
+    local _CMD_FILES=("$CMD_QUEUE_DIR"/*)
+    shopt -u nullglob
 
+    # Back-compat: migrate legacy cmd file into queue
+    if [ -f "$CMD_FILE" ]; then
+      mv "$CMD_FILE" "$CMD_QUEUE_DIR/$(date +%s%N)-legacy" 2>/dev/null || true
+      shopt -s nullglob
+      _CMD_FILES=("$CMD_QUEUE_DIR"/*)
+      shopt -u nullglob
+    fi
+
+    for _CMD_FILE in "${_CMD_FILES[@]}"; do
+      [ -f "$_CMD_FILE" ] || continue
       local CMD MON_ARG
-      mv "$CMD_FILE" "${CMD_FILE}.processing" 2>/dev/null || continue
-      read -r CMD MON_ARG <"${CMD_FILE}.processing"
-      rm "${CMD_FILE}.processing"
+      read -r CMD MON_ARG <"$_CMD_FILE"
+      rm -f "$_CMD_FILE"
       load_daemon_env
 
       log "Command received: $CMD${MON_ARG:+ $MON_ARG}"
@@ -1335,7 +1347,7 @@ daemon_loop() {
         ;;
       esac
 
-    fi
+    done
 
     ################################
     # TICK CHECK
@@ -1381,7 +1393,7 @@ daemon_loop() {
     shopt -u nullglob
 
     if [ "${_USE_INOTIFY:-0}" -eq 1 ]; then
-      inotifywait -q -e create,moved_to "$STATE_DIR" --timeout 1 2>/dev/null || true
+      inotifywait -q -e create,moved_to "$STATE_DIR" "$CMD_QUEUE_DIR" --timeout 1 2>/dev/null || true
     else
       sleep 0.5
     fi
@@ -1418,7 +1430,7 @@ send_cmd() {
     fi
   fi
 
-  printf "%s\n" "$CMD${MON:+ $MON}" >"$CMD_FILE"
+  printf "%s\n" "$CMD${MON:+ $MON}" >"$CMD_QUEUE_DIR/$(date +%s%N)-$RANDOM"
 
 }
 
