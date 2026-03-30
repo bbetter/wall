@@ -11,7 +11,7 @@
 # Key concepts:
 #   Config file  — ~/.config/wall/config (sourced for FPS, scaling, audio, etc.)
 #   State dir    — ~/.cache/wall (daemon PID, per-monitor subdirs, cache, log)
-#   Daemon IPC   — commands are written to a "cmd" file; the daemon loop polls it
+#   Daemon IPC   — commands are written as files to cmd.d/; the daemon loop drains them in order
 #   Per-monitor  — each monitor gets its own state: current wallpaper, mode, index,
 #                  shuffle order, playlist name, and next-tick timestamp
 #
@@ -1406,7 +1406,7 @@ daemon_loop() {
 # SEND COMMAND
 ########################################
 
-# Write a command to the daemon's CMD_FILE for async processing.
+# Write a command to the daemon's CMD_QUEUE_DIR for async processing.
 # Starts the daemon automatically if it is not running.
 send_cmd() {
 
