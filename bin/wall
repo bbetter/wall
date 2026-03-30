@@ -1161,6 +1161,33 @@ run_by_id() {
 
 }
 
+# Re-launch the current wallpaper on a monitor without advancing state.
+# Used for crash recovery — keeps the same wallpaper, same mode, same tick.
+relaunch_current_for() {
+
+  local MON="$1"
+  local D
+  D=$(mon_state_dir "$MON")
+
+  local CURRENT_ID
+  CURRENT_ID=$(cat "$D/current" 2>/dev/null)
+
+  if [ -z "$CURRENT_ID" ]; then
+    log "relaunch_current_for $MON: no current wallpaper in state, skipping"
+    return 1
+  fi
+
+  local TARGET="$WORKSHOP_DIR/$CURRENT_ID"
+  if [ ! -d "$TARGET" ]; then
+    log "relaunch_current_for $MON: wallpaper $CURRENT_ID missing, skipping"
+    return 1
+  fi
+
+  log "relaunch_current_for $MON: relaunching $CURRENT_ID"
+  launch_on_monitor "$TARGET" "$MON"
+
+}
+
 ########################################
 # DAEMON LOOP
 ########################################
@@ -1349,7 +1376,7 @@ daemon_loop() {
           ENGINE_PID=$(cat "$ENGINE_PID_FILE" 2>/dev/null)
           if [ -n "$ENGINE_PID" ] && ! kill -0 "$ENGINE_PID" 2>/dev/null; then
             log "Engine died on $MON_NAME (pid $ENGINE_PID), relaunching"
-            next_wallpaper_for "$MON_NAME"
+            relaunch_current_for "$MON_NAME"
           fi
         fi
       fi
