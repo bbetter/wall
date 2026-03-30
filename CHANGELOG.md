@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.1.6
+- Fix: reload race condition — concurrent reloads now serialize via flock (same lock as start)
+- Fix: crash recovery relaunches same wallpaper instead of silently advancing to next
+- Fix: remove overbroad pkill safety net from stop_wallpapers
+- Fix: CMD_FILE single-slot queue replaced with cmd.d directory — concurrent sends no longer drop commands
+
 ## v1.1.5
 - Fix: race condition causing multiple daemon instances to spawn when concurrent commands were issued simultaneously, resulting in duplicate engine processes per monitor
 
