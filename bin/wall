@@ -1435,16 +1435,17 @@ start)
 
 reload)
 
-  if is_running; then
-    kill "$(cat "$PIDFILE")" 2>/dev/null
-    rm -f "$PIDFILE"
-    sleep 0.5
-  fi
-
-  log "Reloading daemon"
-  snapshot_daemon_env
-
-  nohup "$0" daemon >/dev/null 2>&1 &
+  (
+    flock -n 9 || exit 0
+    if is_running; then
+      kill "$(cat "$PIDFILE")" 2>/dev/null
+      rm -f "$PIDFILE"
+      sleep 0.5
+    fi
+    log "Reloading daemon"
+    snapshot_daemon_env
+    nohup "$0" daemon >/dev/null 2>&1 &
+  ) 9>"$STATE_DIR/.start.lock"
   ;;
 
 random)
