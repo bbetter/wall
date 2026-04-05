@@ -1484,6 +1484,14 @@ class WallGui(Gtk.ApplicationWindow):
         self.copy_id_btn.connect("clicked", self._on_copy_id)
         overflow_box.append(self.copy_id_btn)
 
+        overflow_box.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
+
+        self.report_btn = Gtk.Button(label="Report Issue…")
+        self.report_btn.set_sensitive(False)
+        self.report_btn.add_css_class("flat")
+        self.report_btn.connect("clicked", self._on_report_issue)
+        overflow_box.append(self.report_btn)
+
         self._overflow_popover = Gtk.Popover()
         self._overflow_popover.set_child(overflow_box)
         self._overflow_popover.set_has_arrow(False)
@@ -1691,6 +1699,7 @@ class WallGui(Gtk.ApplicationWindow):
         self.open_btn.set_sensitive(True)
         self.playlist_btn.set_sensitive(True)
         self.copy_id_btn.set_sensitive(True)
+        self.report_btn.set_sensitive(True)
         self._fav_btn.set_sensitive(True)
         self._fav_btn.set_label("★" if wall["id"] in self._favorites else "☆")
         self._fav_btn.set_tooltip_text(
@@ -2201,6 +2210,15 @@ class WallGui(Gtk.ApplicationWindow):
         gui_log(f"copy wallpaper id: id={self.selected_id}")
         Gdk.Display.get_default().get_clipboard().set(self.selected_id)
 
+    def _on_report_issue(self, _btn):
+        """Open the Report Issue dialog for the selected wallpaper."""
+        if not self.selected_id:
+            return
+        self._overflow_popover.popdown()
+        gui_log(f"report issue: id={self.selected_id}")
+        win = ReportWindow(self, self.selected_id, self.title_label.get_text())
+        win.present()
+
     def _on_apply(self, _btn):
         """Apply the selected wallpaper: persist staged props, then launch."""
         if not self.selected_id:
@@ -2213,6 +2231,201 @@ class WallGui(Gtk.ApplicationWindow):
         monitor = item.get_string() if item else "ALL"
         gui_log(f"apply monitor: id={self.selected_id} monitor={monitor}")
         apply_wallpaper(self.selected_id, monitor)
+
+
+########################################
+# REPORT WINDOW
+########################################
+
+class ReportWindow(Gtk.Window):
+    """Dialog for filing a bug report against a specific wallpaper.
+
+    Collects a problem description and category from the user, then calls
+    ``wall report --no-interactive`` to write the report file.  After saving,
+    a Share button uploads the file to 0x0.st and copies the URL.
+    """
+
+    CATEGORIES = [
+        ("black-screen",  "Black screen / wallpaper not visible"),
+        ("visual-glitch", "Visual glitch or corruption"),
+        ("crash",         "Crash (engine exits immediately)"),
+        ("performance",   "Performance / lag / low FPS"),
+        ("audio",         "Audio issue"),
+        ("script",        "Script or animation broken"),
+        ("other",         "Other"),
+    ]
+
+    def __init__(self, parent, wall_id, wall_title):
+        super().__init__(title="Report Issue", transient_for=parent, modal=True)
+        self.set_default_size(520, 440)
+        self._wall_id = wall_id
+        self._wall_title = wall_title
+        self._report_file = None
+        self._build_ui()
+
+    def _build_ui(self):
+        root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        root.set_margin_top(16)
+        root.set_margin_bottom(16)
+        root.set_margin_start(16)
+        root.set_margin_end(16)
+        self.set_child(root)
+
+        # Header
+        hdr = Gtk.Label(label=f"Report an issue with:")
+        hdr.set_halign(Gtk.Align.START)
+        hdr.add_css_class("dim-label")
+        root.append(hdr)
+
+        wall_lbl = Gtk.Label(label=self._wall_title or self._wall_id)
+        wall_lbl.set_halign(Gtk.Align.START)
+        wall_lbl.add_css_class("heading")
+        wall_lbl.set_ellipsize(Pango.EllipsizeMode.END)
+        root.append(wall_lbl)
+
+        root.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
+
+        # Category
+        cat_lbl = Gtk.Label(label="Issue type")
+        cat_lbl.set_halign(Gtk.Align.START)
+        root.append(cat_lbl)
+
+        cat_model = Gtk.StringList.new([label for _, label in self.CATEGORIES])
+        self._cat_drop = Gtk.DropDown(model=cat_model)
+        self._cat_drop.set_halign(Gtk.Align.FILL)
+        root.append(self._cat_drop)
+
+        # Description
+        desc_lbl = Gtk.Label(label="Describe the problem")
+        desc_lbl.set_halign(Gtk.Align.START)
+        root.append(desc_lbl)
+
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        scroll.set_vexpand(True)
+        self._desc_view = Gtk.TextView()
+        self._desc_view.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+        self._desc_view.set_monospace(False)
+        scroll.set_child(self._desc_view)
+        root.append(scroll)
+
+        # Status label (shown after save)
+        self._status_lbl = Gtk.Label(label="")
+        self._status_lbl.set_halign(Gtk.Align.START)
+        self._status_lbl.add_css_class("dim-label")
+        self._status_lbl.set_wrap(True)
+        self._status_lbl.set_visible(False)
+        root.append(self._status_lbl)
+
+        # Buttons
+        btn_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+
+        cancel_btn = Gtk.Button(label="Cancel")
+        cancel_btn.connect("clicked", lambda _: self.close())
+        btn_row.append(cancel_btn)
+
+        spacer = Gtk.Box()
+        spacer.set_hexpand(True)
+        btn_row.append(spacer)
+
+        self._share_btn = Gtk.Button(label="Share…")
+        self._share_btn.set_tooltip_text("Upload report and copy URL to clipboard")
+        self._share_btn.set_visible(False)
+        self._share_btn.connect("clicked", self._on_share)
+        btn_row.append(self._share_btn)
+
+        self._save_btn = Gtk.Button(label="Save Report")
+        self._save_btn.add_css_class("suggested-action")
+        self._save_btn.connect("clicked", self._on_save)
+        btn_row.append(self._save_btn)
+
+        root.append(btn_row)
+
+    def _on_save(self, _btn):
+        """Collect form data and call wall report --no-interactive."""
+        buf = self._desc_view.get_buffer()
+        desc = buf.get_text(buf.get_start_iter(), buf.get_end_iter(), False).strip()
+        if not desc:
+            self._status_lbl.set_text("Please enter a description.")
+            self._status_lbl.set_visible(True)
+            return
+
+        cat_idx = self._cat_drop.get_selected()
+        category = self.CATEGORIES[cat_idx][0] if cat_idx < len(self.CATEGORIES) else "other"
+
+        self._save_btn.set_sensitive(False)
+        self._save_btn.set_label("Saving…")
+
+        def _do_save():
+            result = wall_cmd(
+                "report",
+                "--id", self._wall_id,
+                "--desc", desc,
+                "--category", category,
+                "--no-interactive",
+            )
+            GLib.idle_add(self._on_saved, result)
+
+        threading.Thread(target=_do_save, daemon=True).start()
+
+    def _on_saved(self, output):
+        """Update UI after wall report completes."""
+        self._save_btn.set_sensitive(True)
+        self._save_btn.set_label("Save Report")
+
+        # The last non-empty line of output is the file path
+        lines = [l for l in (output or "").splitlines() if l.strip()]
+        file_path = lines[-1] if lines else ""
+
+        if file_path and os.path.isfile(file_path):
+            self._report_file = file_path
+            self._status_lbl.set_text(f"Saved: {file_path}")
+            self._status_lbl.set_visible(True)
+            self._share_btn.set_visible(True)
+            self._save_btn.set_label("Saved ✓")
+            self._save_btn.set_sensitive(False)
+            gui_log(f"report saved: {file_path}")
+        else:
+            self._status_lbl.set_text("Failed to save report. Check wall log for details.")
+            self._status_lbl.set_visible(True)
+            gui_log(f"report save failed, output={output!r}")
+        return False
+
+    def _on_share(self, _btn):
+        """Upload the saved report and copy the URL."""
+        if not self._report_file:
+            return
+        self._share_btn.set_sensitive(False)
+        self._share_btn.set_label("Uploading…")
+
+        def _do_share():
+            result = wall_cmd("report", "share", self._report_file)
+            GLib.idle_add(self._on_shared, result)
+
+        threading.Thread(target=_do_share, daemon=True).start()
+
+    def _on_shared(self, output):
+        """Show the share URL and copy it to clipboard."""
+        self._share_btn.set_sensitive(True)
+        self._share_btn.set_label("Share…")
+
+        lines = [l for l in (output or "").splitlines() if l.strip()]
+        url = ""
+        for line in lines:
+            if line.startswith("http"):
+                url = line.strip()
+                break
+
+        if url:
+            Gdk.Display.get_default().get_clipboard().set(url)
+            self._status_lbl.set_text(f"Shared: {url}  (copied to clipboard)")
+            self._share_btn.set_label("Shared ✓")
+            self._share_btn.set_sensitive(False)
+            gui_log(f"report shared: {url}")
+        else:
+            self._status_lbl.set_text("Share failed. Check your internet connection.")
+            gui_log(f"report share failed, output={output!r}")
+        return False
 
 
 ########################################
