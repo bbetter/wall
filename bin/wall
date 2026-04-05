@@ -64,7 +64,6 @@ CYCLE_FILE="$STATE_DIR/cycle"
 CACHE_FILE="$STATE_DIR/list.cache"
 PROPS_DIR="$HOME/.config/wall/props"
 FLAGS_DIR="$HOME/.config/wall/wallflags"
-EXCLUDED_FILE="$HOME/.config/wall/excluded"
 PLAYLISTS_DIR="$HOME/.config/wall/playlists"
 REPORTS_DIR="$HOME/.config/wall/reports"
 
@@ -668,21 +667,13 @@ ensure_cache() {
 # LOAD WALL LIST
 ########################################
 
-# Load all non-excluded wallpaper paths into the WALLS array. Sets TOTAL.
+# Load all wallpaper paths into the WALLS array. Sets TOTAL.
 load_walls() {
 
   ensure_cache
 
-  local -A _EXCLUDED=()
-  if [ -f "$EXCLUDED_FILE" ]; then
-    while IFS= read -r _ex_id; do
-      [ -n "$_ex_id" ] && _EXCLUDED["$_ex_id"]=1
-    done <"$EXCLUDED_FILE"
-  fi
-
   mapfile -t WALLS < <(
     while IFS=$'\t' read -r ID _TITLE TAGS _; do
-      [ "${_EXCLUDED[$ID]+_}" ] && continue
       if [ -n "${TAG_FILTER:-}" ]; then
         echo "$TAGS" | grep -qiF "$TAG_FILTER" || continue
       fi
@@ -1707,8 +1698,7 @@ info)
     --argjson props "$INFO_PROPS" \
     --argjson warnings "$INFO_WARNINGS" \
     --argjson unsupported "$INFO_UNSUPPORTED" \
-    --argjson excluded "$(grep -qxF "$INFO_ID" "$EXCLUDED_FILE" 2>/dev/null && echo true || echo false)" \
-    '. + {id: $id, thumbnail: $thumb, excluded: $excluded}
+    '. + {id: $id, thumbnail: $thumb}
           + (if $video != {} then {video: $video} else {} end)
           + (if ($props | length) > 0 then {properties: $props} else {} end)
           + (if ($warnings | length) > 0 then {warnings: $warnings} else {} end)
@@ -1785,53 +1775,6 @@ prop)
 
 report)
   case "${2:-}" in
-
-  share)
-    # wall report share [file]
-    # Upload a saved report to 0x0.st and print the URL.
-    _SHARE_FILE="${3:-}"
-    if [ -z "$_SHARE_FILE" ]; then
-      # Show the most recent report files and let user pick
-      if [ ! -d "$REPORTS_DIR" ] || [ -z "$(ls -A "$REPORTS_DIR" 2>/dev/null)" ]; then
-        echo "No saved reports found. Run 'wall report' first." >&2
-        exit 1
-      fi
-      echo "Saved reports:"
-      _IDX=0
-      declare -a _RFILES=()
-      while IFS= read -r _f; do
-        _IDX=$(( _IDX + 1 ))
-        _RFILES+=("$_f")
-        printf "  %d) %s\n" "$_IDX" "$(basename "$_f")"
-      done < <(ls -t "$REPORTS_DIR"/*.md 2>/dev/null)
-      if [ "${#_RFILES[@]}" -eq 0 ]; then
-        echo "No reports found." >&2; exit 1
-      fi
-      if [ "${#_RFILES[@]}" -eq 1 ]; then
-        _SHARE_FILE="${_RFILES[0]}"
-        echo "Using: $(basename "$_SHARE_FILE")"
-      else
-        read -r -p "Select report [1-${#_RFILES[@]}]: " _PICK
-        _SHARE_FILE="${_RFILES[$(( _PICK - 1 ))]}"
-        [ -f "$_SHARE_FILE" ] || { echo "Invalid selection." >&2; exit 1; }
-      fi
-    fi
-    [ -f "$_SHARE_FILE" ] || { echo "Report file not found: $_SHARE_FILE" >&2; exit 1; }
-    echo "Uploading report..."
-    _SHARE_URL=$(curl -fsS -F "file=@$_SHARE_FILE" https://0x0.st 2>/dev/null)
-    if [ -z "$_SHARE_URL" ]; then
-      echo "Upload failed. Share the file directly: $_SHARE_FILE" >&2; exit 1
-    fi
-    echo "Report URL: $_SHARE_URL"
-    # Copy to clipboard if a clipboard tool is available
-    if command -v wl-copy &>/dev/null; then
-      printf '%s' "$_SHARE_URL" | wl-copy && echo "(URL copied to clipboard)"
-    elif command -v xclip &>/dev/null; then
-      printf '%s' "$_SHARE_URL" | xclip -selection clipboard && echo "(URL copied to clipboard)"
-    elif command -v xsel &>/dev/null; then
-      printf '%s' "$_SHARE_URL" | xsel --clipboard --input && echo "(URL copied to clipboard)"
-    fi
-    ;;
 
   list)
     # wall report list — show saved reports
@@ -2312,33 +2255,6 @@ cache)
   esac
   ;;
 
-exclude)
-  EX_ID="${2:-}"
-  if [ -z "$EX_ID" ]; then
-    echo "Usage: wall exclude <id>" >&2
-    exit 1
-  fi
-  mkdir -p "$(dirname "$EXCLUDED_FILE")"
-  if grep -qxF "$EX_ID" "$EXCLUDED_FILE" 2>/dev/null; then
-    echo "$EX_ID is already excluded"
-  else
-    echo "$EX_ID" >>"$EXCLUDED_FILE"
-    echo "Excluded $EX_ID from random/cycle/shuffle"
-  fi
-  ;;
-
-include)
-  INC_ID="${2:-}"
-  if [ -z "$INC_ID" ]; then
-    echo "Usage: wall include <id>" >&2
-    exit 1
-  fi
-  if [ -f "$EXCLUDED_FILE" ]; then
-    grep -vxF "$INC_ID" "$EXCLUDED_FILE" >"${EXCLUDED_FILE}.tmp" && mv "${EXCLUDED_FILE}.tmp" "$EXCLUDED_FILE"
-  fi
-  echo "Included $INC_ID in random/cycle/shuffle"
-  ;;
-
 playlist)
   case "${2:-}" in
 
@@ -2536,8 +2452,6 @@ playlist)
   echo "  wall set volume <0-100>"
   echo "  wall log"
   echo "  wall cache [clear|rebuild]"
-  echo "  wall exclude <id>"
-  echo "  wall include <id>"
   echo "  wall playlist create/add/remove/delete/list/show <name>"
   echo "  wall playlist play <name> [seconds] [monitor]"
   echo "  wall playlist shuffle <name> [seconds] [monitor]"
@@ -2545,7 +2459,6 @@ playlist)
   echo "  wall update [--force] [--whatsnew]"
   echo "  wall version [--all]"
   echo "  wall report"
-  echo "  wall report share [file]"
   echo "  wall report list"
   ;;
 

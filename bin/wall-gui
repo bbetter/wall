@@ -2328,11 +2328,11 @@ class ReportWindow(Gtk.Window):
         spacer.set_hexpand(True)
         btn_row.append(spacer)
 
-        self._share_btn = Gtk.Button(label="Share…")
-        self._share_btn.set_tooltip_text("Upload report and copy URL to clipboard")
-        self._share_btn.set_visible(False)
-        self._share_btn.connect("clicked", self._on_share)
-        btn_row.append(self._share_btn)
+        self._open_folder_btn = Gtk.Button(label="Open Folder")
+        self._open_folder_btn.set_tooltip_text("Open the reports folder to share the file")
+        self._open_folder_btn.set_visible(False)
+        self._open_folder_btn.connect("clicked", self._on_open_folder)
+        btn_row.append(self._open_folder_btn)
 
         self._save_btn = Gtk.Button(label="Save Report")
         self._save_btn.add_css_class("suggested-action")
@@ -2379,9 +2379,9 @@ class ReportWindow(Gtk.Window):
 
         if file_path and os.path.isfile(file_path):
             self._report_file = file_path
-            self._status_lbl.set_text(f"Saved: {file_path}")
+            self._status_lbl.set_text(f"Saved: {os.path.basename(file_path)}")
             self._status_lbl.set_visible(True)
-            self._share_btn.set_visible(True)
+            self._open_folder_btn.set_visible(True)
             self._save_btn.set_label("Saved ✓")
             self._save_btn.set_sensitive(False)
             gui_log(f"report saved: {file_path}")
@@ -2391,41 +2391,12 @@ class ReportWindow(Gtk.Window):
             gui_log(f"report save failed, output={output!r}")
         return False
 
-    def _on_share(self, _btn):
-        """Upload the saved report and copy the URL."""
-        if not self._report_file:
-            return
-        self._share_btn.set_sensitive(False)
-        self._share_btn.set_label("Uploading…")
-
-        def _do_share():
-            result = wall_cmd("report", "share", self._report_file)
-            GLib.idle_add(self._on_shared, result)
-
-        threading.Thread(target=_do_share, daemon=True).start()
-
-    def _on_shared(self, output):
-        """Show the share URL and copy it to clipboard."""
-        self._share_btn.set_sensitive(True)
-        self._share_btn.set_label("Share…")
-
-        lines = [l for l in (output or "").splitlines() if l.strip()]
-        url = ""
-        for line in lines:
-            if line.startswith("http"):
-                url = line.strip()
-                break
-
-        if url:
-            Gdk.Display.get_default().get_clipboard().set(url)
-            self._status_lbl.set_text(f"Shared: {url}  (copied to clipboard)")
-            self._share_btn.set_label("Shared ✓")
-            self._share_btn.set_sensitive(False)
-            gui_log(f"report shared: {url}")
-        else:
-            self._status_lbl.set_text("Share failed. Check your internet connection.")
-            gui_log(f"report share failed, output={output!r}")
-        return False
+    def _on_open_folder(self, _btn):
+        """Open the reports folder in the system file manager."""
+        reports_dir = os.path.expanduser("~/.config/wall/reports")
+        os.makedirs(reports_dir, exist_ok=True)
+        gui_log(f"open reports folder: {reports_dir}")
+        subprocess.Popen(["xdg-open", reports_dir])
 
 
 ########################################
