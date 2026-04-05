@@ -2292,6 +2292,7 @@ class ReportWindow(Gtk.Window):
 
         cat_model = Gtk.StringList.new([label for _, label in self.CATEGORIES])
         self._cat_drop = Gtk.DropDown(model=cat_model)
+        self._cat_drop.set_selected(len(self.CATEGORIES) - 1)  # default to "other"
         self._cat_drop.set_halign(Gtk.Align.FILL)
         root.append(self._cat_drop)
 
