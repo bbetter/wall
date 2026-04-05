@@ -1767,9 +1767,19 @@ class WallGui(Gtk.ApplicationWindow):
         else:
             self._error_box.set_visible(False)
 
-        warnings = info.get("warnings", [])
-        if warnings:
-            self._warn_label.set_markup("<big><b>" + " · ".join(warnings) + "</b></big>")
+        warn_lines = []
+        for w in info.get("warnings", []):
+            warn_lines.append(w)
+        for issue in info.get("runtime_issues", []):
+            warn_lines.append(f"⚠ Last run skipped: {issue}")
+        report_count = info.get("report_count", 0)
+        if report_count:
+            s = "s" if report_count > 1 else ""
+            warn_lines.append(f"📋 {report_count} user report{s} filed for this wallpaper")
+        if warn_lines:
+            self._warn_label.set_markup(
+                "<big><b>" + "\n".join(GLib.markup_escape_text(l) for l in warn_lines) + "</b></big>"
+            )
             self._warn_box.set_visible(True)
         else:
             self._warn_box.set_visible(False)

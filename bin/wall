@@ -22,7 +22,7 @@
 # CONFIG
 ########################################
 
-VERSION="1.1.8"
+VERSION="1.1.9"
 
 CONFIG_FILE="$HOME/.config/wall/config"
 
@@ -66,6 +66,7 @@ PROPS_DIR="$HOME/.config/wall/props"
 FLAGS_DIR="$HOME/.config/wall/wallflags"
 PLAYLISTS_DIR="$HOME/.config/wall/playlists"
 REPORTS_DIR="$HOME/.config/wall/reports"
+ISSUES_DIR="$HOME/.config/wall/issues"
 
 ########################################
 # DEFAULTS
@@ -573,6 +574,10 @@ launch_on_monitor() {
   fi
   log "engine launch: monitor=$MON id=$ID bin=$ENGINE_BIN resolved=$ENGINE_RESOLVED fps=$FPS scaling=$SCALING clamp=${CLAMP:-border} audio=${AUDIO:-0} volume=${VOLUME:-15} fullscreen_pause=${FULLSCREEN_PAUSE:-0} wall_flags=${#WP_FLAGS[@]} prop_flags=${#PROP_FLAGS[@]} DISPLAY=${DISPLAY:-unset} WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-unset} XDG_SESSION_TYPE=${XDG_SESSION_TYPE:-unset}"
 
+  # Clear runtime issues from the previous run for this wallpaper
+  mkdir -p "$ISSUES_DIR"
+  rm -f "$ISSUES_DIR/$ID"
+
   "$ENGINE_BIN" \
     "$DIR" \
     --assets-dir "$ASSETS" \
@@ -585,7 +590,13 @@ launch_on_monitor() {
     "${WP_FLAGS[@]}" \
     "${PROP_FLAGS[@]}" \
     > >(while IFS= read -r _line; do engine_log "monitor=$MON id=$ID stdout: $_line"; done) \
-    2> >(while IFS= read -r _line; do engine_log "monitor=$MON id=$ID stderr: $_line"; done) &
+    2> >(while IFS= read -r _line; do
+      engine_log "monitor=$MON id=$ID stderr: $_line"
+      case "$_line" in
+        "Cannot setup particle "*|"Cannot setup image "*|"Cannot setup text "*)
+          echo "$_line" >>"$ISSUES_DIR/$ID" ;;
+      esac
+    done) &
 
   local LAUNCHED_PID=$!
   echo "$LAUNCHED_PID" >"$D/pid"
@@ -1693,16 +1704,33 @@ info)
   elif [ "$INFO_TYPE_RAW" = "web" ] || [ "$INFO_TYPE_RAW" = "application" ]; then
     INFO_UNSUPPORTED="true"
   fi
+  # Collect runtime issues from last engine run
+  INFO_RUNTIME_ISSUES="[]"
+  if [ -f "$ISSUES_DIR/$INFO_ID" ]; then
+    while IFS= read -r _issue_line; do
+      [ -n "$_issue_line" ] && \
+        INFO_RUNTIME_ISSUES=$(printf '%s' "$INFO_RUNTIME_ISSUES" | \
+          jq --arg msg "$_issue_line" '. + [$msg]')
+    done <"$ISSUES_DIR/$INFO_ID"
+  fi
+
+  # Count filed reports for this wallpaper
+  INFO_REPORT_COUNT=$(ls "$REPORTS_DIR"/report-*-"${INFO_ID}".md 2>/dev/null | wc -l | tr -d ' ')
+
   jq --arg id "$INFO_ID" --arg thumb "$INFO_THUMB" \
     --argjson video "$INFO_VIDEO" \
     --argjson props "$INFO_PROPS" \
     --argjson warnings "$INFO_WARNINGS" \
     --argjson unsupported "$INFO_UNSUPPORTED" \
+    --argjson runtime_issues "$INFO_RUNTIME_ISSUES" \
+    --argjson report_count "$INFO_REPORT_COUNT" \
     '. + {id: $id, thumbnail: $thumb}
           + (if $video != {} then {video: $video} else {} end)
           + (if ($props | length) > 0 then {properties: $props} else {} end)
           + (if ($warnings | length) > 0 then {warnings: $warnings} else {} end)
-          + (if $unsupported then {unsupported: true} else {} end)' \
+          + (if $unsupported then {unsupported: true} else {} end)
+          + (if ($runtime_issues | length) > 0 then {runtime_issues: $runtime_issues} else {} end)
+          + (if ($report_count | tonumber) > 0 then {report_count: ($report_count | tonumber)} else {} end)' \
     "$INFO_DIR/project.json"
   ;;
 
