@@ -22,7 +22,7 @@
 # CONFIG
 ########################################
 
-VERSION="1.1.9"
+VERSION="1.1.10"
 
 CONFIG_FILE="$HOME/.config/wall/config"
 
@@ -67,6 +67,29 @@ FLAGS_DIR="$HOME/.config/wall/wallflags"
 PLAYLISTS_DIR="$HOME/.config/wall/playlists"
 REPORTS_DIR="$HOME/.config/wall/reports"
 ISSUES_DIR="$HOME/.config/wall/issues"
+
+########################################
+# WALLPAPER COMPATIBILITY NOTES
+# Keyed by Steam Workshop ID.
+# Distributed with each wall release so
+# users automatically receive updates.
+########################################
+
+_WALLPAPER_NOTES='{
+  "3498984739": [
+    "Group-type scene objects are not yet rendered by the engine — some elements may appear missing (investigated in engine v0.0.19)",
+    "thisObject JS global was undefined in this wallpaper'\''s scripts — fixed in engine v0.0.19"
+  ],
+  "3566859704": [
+    "Reported as not rendering — under investigation"
+  ],
+  "3619024125": [
+    "Reported: clock not displayed and animations run too fast — under investigation"
+  ],
+  "3501711000": [
+    "Portrait/landscape element positioning may be off — this wallpaper targets mobile aspect ratios"
+  ]
+}'
 
 ########################################
 # DEFAULTS
@@ -1717,6 +1740,9 @@ info)
   # Count filed reports for this wallpaper
   INFO_REPORT_COUNT=$(ls "$REPORTS_DIR"/report-*-"${INFO_ID}".md 2>/dev/null | wc -l | tr -d ' ')
 
+  # Look up curated compatibility notes for this wallpaper
+  INFO_COMPAT_NOTES=$(printf '%s' "$_WALLPAPER_NOTES" | jq --arg id "$INFO_ID" '.[$id] // []')
+
   jq --arg id "$INFO_ID" --arg thumb "$INFO_THUMB" \
     --argjson video "$INFO_VIDEO" \
     --argjson props "$INFO_PROPS" \
@@ -1724,13 +1750,15 @@ info)
     --argjson unsupported "$INFO_UNSUPPORTED" \
     --argjson runtime_issues "$INFO_RUNTIME_ISSUES" \
     --argjson report_count "$INFO_REPORT_COUNT" \
+    --argjson compat_notes "$INFO_COMPAT_NOTES" \
     '. + {id: $id, thumbnail: $thumb}
           + (if $video != {} then {video: $video} else {} end)
           + (if ($props | length) > 0 then {properties: $props} else {} end)
           + (if ($warnings | length) > 0 then {warnings: $warnings} else {} end)
           + (if $unsupported then {unsupported: true} else {} end)
           + (if ($runtime_issues | length) > 0 then {runtime_issues: $runtime_issues} else {} end)
-          + (if ($report_count | tonumber) > 0 then {report_count: ($report_count | tonumber)} else {} end)' \
+          + (if ($report_count | tonumber) > 0 then {report_count: ($report_count | tonumber)} else {} end)
+          + (if ($compat_notes | length) > 0 then {compat_notes: $compat_notes} else {} end)' \
     "$INFO_DIR/project.json"
   ;;
 

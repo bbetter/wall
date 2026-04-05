@@ -1772,6 +1772,8 @@ class WallGui(Gtk.ApplicationWindow):
             warn_lines.append(w)
         for issue in info.get("runtime_issues", []):
             warn_lines.append(f"⚠ Last run skipped: {issue}")
+        for note in info.get("compat_notes", []):
+            warn_lines.append(f"ℹ {note}")
         report_count = info.get("report_count", 0)
         if report_count:
             s = "s" if report_count > 1 else ""
