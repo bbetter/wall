@@ -1896,7 +1896,7 @@ report)
       # Find the last launch entry for this ID and capture everything after it
       _LAUNCH_LINE=$(grep -n "Launching:.*${_R_TITLE:0:30}\|engine launch:.*id=${_R_ID}\b" "$LOGFILE" 2>/dev/null | tail -1 | cut -d: -f1)
       if [ -n "$_LAUNCH_LINE" ]; then
-        _R_LOG_LINES=$(tail -n +"$_LAUNCH_LINE" "$LOGFILE" | head -200)
+        _R_LOG_LINES=$(tail -n +"$_LAUNCH_LINE" "$LOGFILE" | grep -E " id=${_R_ID}([ :]|$)" | head -100)
       else
         # Fallback: grep for ENGINE lines with this ID
         _R_LOG_LINES=$(grep "id=${_R_ID}" "$LOGFILE" 2>/dev/null | tail -100)
