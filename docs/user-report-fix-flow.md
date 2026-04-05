@@ -13,6 +13,29 @@ Reusable playbook for every fix cycle: triage reports → reproduce → fix in `
 
 ---
 
+## Report folder layout
+
+```
+user-reports/                  ← open / not yet investigated
+user-reports/requires-review/  ← fix applied, needs human verification
+user-reports/archive/          ← confirmed resolved
+```
+
+All three folders are gitignored — local working state only.  
+After applying a fix for a wallpaper, move its report(s):
+```bash
+mv user-reports/report-*-<id>.md user-reports/requires-review/
+```
+
+Use `bin/wall-review` (dev tool, not in installer) to step through `requires-review/`:
+- **[s]** launches the wallpaper via `wall <id>` so you can check it live
+- **[d]** archives it (confirmed fixed)
+- **[r]** reopens it back to `user-reports/` (still broken)
+- **[n]** skips to next
+- **[q]** quits
+
+---
+
 ## Step 1 — Collect and triage reports
 
 Reports are saved by users via `wall report` or the GUI "Report Issue…" dialog.  
@@ -197,6 +220,7 @@ Compatibility notes  (for every wallpaper tinkered with)
 [ ] Add/update entry in _WALLPAPER_NOTES in bin/wall
 [ ] Be explicit: partial fix, skipped rendering, open investigation, etc.
 [ ] Reference engine version if a fix landed
+[ ] mv user-reports/report-*-<id>.md user-reports/requires-review/
 
 Release wall  (if wall was changed)
 [ ] Bump VERSION in bin/wall
@@ -208,4 +232,7 @@ Release engine  (if engine was changed)
 [ ] git commit -m "[RELEASE] v0.0.X: ..."
 [ ] ./release.sh v0.0.X
 [ ] Confirm release published on GitHub
+
+Verify fixes
+[ ] bin/wall-review  — step through requires-review/, archive confirmed fixes, reopen regressions
 ```

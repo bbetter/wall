@@ -1,0 +1,150 @@
+#!/usr/bin/env bash
+# wall-review — dev tool: step through fixed wallpaper reports and verify them
+#
+# Not distributed by the installer. Run directly from a wall repo clone.
+# Reports move through:  user-reports/  →  requires-review/  →  archive/
+#
+# Usage:
+#   ./bin/wall-review              review all pending reports
+#   ./bin/wall-review <report.md>  review a specific file
+
+set -euo pipefail
+
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPORTS_DIR="$REPO_DIR/user-reports"
+REVIEW_DIR="$REPORTS_DIR/requires-review"
+ARCHIVE_DIR="$REPORTS_DIR/archive"
+
+mkdir -p "$REVIEW_DIR" "$ARCHIVE_DIR"
+
+# ── helpers ──────────────────────────────────────────────────────────────────
+
+_field() {
+  grep -m1 "| $2 |" "$1" 2>/dev/null \
+    | sed 's/^[[:space:]]*|[^|]*|[[:space:]]*\(.*\)[[:space:]]*|[[:space:]]*$/\1/' \
+    | xargs
+}
+
+_problem() {
+  sed -n '/^## Problem Description/,/^##/{/^## Problem/d;/^##/d;p}' "$1" \
+    | sed '/^[[:space:]]*$/d' | head -4
+}
+
+_hr() { printf '%*s\n' "${COLUMNS:-72}" '' | tr ' ' '─'; }
+
+_prompt() { printf '  [s] launch   [d] done → archive   [r] reopen   [n] skip   [q] quit  › '; }
+
+# ── load files ───────────────────────────────────────────────────────────────
+
+if [ -n "${1:-}" ]; then
+  if [ ! -f "$1" ]; then
+    echo "File not found: $1" >&2
+    exit 1
+  fi
+  FILES=("$1")
+else
+  shopt -s nullglob
+  FILES=("$REVIEW_DIR"/report-*.md)
+  shopt -u nullglob
+fi
+
+if [ ${#FILES[@]} -eq 0 ]; then
+  echo "No reports pending review in user-reports/requires-review/"
+  echo "Move reports there after applying a fix:"
+  echo "  mv user-reports/report-*-<id>.md user-reports/requires-review/"
+  exit 0
+fi
+
+# ── review loop ──────────────────────────────────────────────────────────────
+
+TOTAL=${#FILES[@]}
+echo "  ${TOTAL} report$([ "$TOTAL" -ne 1 ] && echo s || true) pending review"
+
+IDX=0
+while true; do
+  # Refresh file list (files may have been moved)
+  if [ -z "${1:-}" ]; then
+    shopt -s nullglob
+    mapfile -t FILES < <(printf '%s\n' "$REVIEW_DIR"/report-*.md | sort)
+    shopt -u nullglob
+    TOTAL=${#FILES[@]}
+  fi
+
+  [ ${#FILES[@]} -eq 0 ] && break
+  [ $IDX -ge ${#FILES[@]} ] && break
+
+  FILE="${FILES[$IDX]}"
+  [ ! -f "$FILE" ] && { IDX=$((IDX+1)); continue; }
+
+  BASENAME="$(basename "$FILE")"
+  ID="${BASENAME%.md}"; ID="${ID##*-}"
+
+  TITLE="$(_field "$FILE" Title)"
+  CATEGORY="$(_field "$FILE" Category)"
+  DATE="$(_field "$FILE" Date)"
+
+  echo
+  _hr
+  printf '  [%d/%d]  %s\n' "$((IDX+1))" "$TOTAL" "$TITLE"
+  printf '  ID: %s   Category: %s   Date: %s\n' "$ID" "$CATEGORY" "$DATE"
+  echo
+
+  PROBLEM="$(_problem "$FILE")"
+  if [ -n "$PROBLEM" ]; then
+    echo "  Reported:"
+    while IFS= read -r line; do
+      printf '    %s\n' "$line"
+    done <<< "$PROBLEM"
+    echo
+  fi
+
+  printf '  Workshop: https://steamcommunity.com/sharedfiles/filedetails/?id=%s\n' "$ID"
+  echo
+
+  _prompt
+
+  while true; do
+    read -rsn1 KEY
+    case "$KEY" in
+      s|S)
+        echo "s"
+        printf '  → wall %s\n' "$ID"
+        if wall "$ID" 2>/dev/null; then
+          echo "  Wallpaper set. Check your display, then press any key to continue."
+        else
+          echo "  wall command failed — is the daemon running? (wall start)"
+        fi
+        read -rsn1
+        _prompt
+        ;;
+      d|D)
+        echo "d"
+        mv "$FILE" "$ARCHIVE_DIR/"
+        printf '  → archived: %s\n' "$BASENAME"
+        # IDX unchanged — next file slides into this slot after refresh
+        break
+        ;;
+      r|R)
+        echo "r"
+        mv "$FILE" "$REPORTS_DIR/"
+        printf '  → reopened: %s\n' "$BASENAME"
+        break
+        ;;
+      n|N|'')
+        echo "n"
+        IDX=$((IDX+1))
+        break
+        ;;
+      q|Q)
+        echo "q"
+        echo
+        exit 0
+        ;;
+    esac
+  done
+done
+
+echo
+_hr
+echo "  All reports reviewed."
+echo
