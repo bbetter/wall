@@ -1842,6 +1842,18 @@ report)
       fi
     fi
 
+    # If --id was given directly without --monitor, look up which monitor it's on
+    if [ -z "$_R_MON" ]; then
+      shopt -s nullglob
+      for _MP in "$MON_DIR"/*/; do
+        if [ "$(cat "${_MP}current" 2>/dev/null)" = "$_R_ID" ]; then
+          _R_MON=$(basename "$_MP")
+          break
+        fi
+      done
+      shopt -u nullglob
+    fi
+
     # ---- Resolve wallpaper metadata ----
     _R_PROJ="$WORKSHOP_DIR/$_R_ID/project.json"
     if [ ! -f "$_R_PROJ" ]; then
